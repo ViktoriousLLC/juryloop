@@ -1,14 +1,24 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Tribunal repository configuration",
+  "title": "Juryloop repository configuration",
   "description": "All fields are optional. Paths resolve from the consuming repository root; absolute paths are also accepted. Configure paths, leg names, and gate switches, never credential values. Registry membership and file contents are checked by policy.mjs at runtime.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "judgeWholeFiles": {
+      "type": "boolean",
+      "default": false,
+      "description": "Send the full text of files cited by lone PR findings at the reviewed head commit to the judge seat only. Regular files touched by the diff, excluding the merge-base goals directory; at most 100 KB per file and 300 KB per round, highest severity first."
+    },
+    "securityRaise": {
+      "type": "boolean",
+      "default": true,
+      "description": "Raise security findings one severity level before the stop decision when two named makers agree or the blinded judge keeps the finding."
+    },
     "judge": {
       "type": "boolean",
       "default": true,
-      "description": "Run the blinded judge on single-model findings after each round (trial). Annotation only."
+      "description": "Run the blinded judge on single-model findings before the stop decision. Kept security findings can be raised when securityRaise is enabled."
     },
     "preset": {
       "type": "string",

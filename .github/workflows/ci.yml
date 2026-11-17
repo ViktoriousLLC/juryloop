@@ -28,6 +28,8 @@ jobs:
       - name: Test hooks
         run: node --test
         working-directory: tribunal/hooks
+      - name: Test the old-name placeholder
+        run: node --test tribunal-review-moved/hooks/moved.test.cjs
       - name: Run goal-wall negative control
         run: node --test goal-wall.negative-control.cjs
         working-directory: tribunal/hooks

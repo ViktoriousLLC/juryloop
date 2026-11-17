@@ -167,7 +167,7 @@ test('B1 a dirty goal with no banked row blocks, naming the file and the clearin
     if (!CONTROL) {
       assert.match(r.stderr, /BLOCKED/);
       assert.match(r.stderr, /existing\.md/);
-      assert.match(r.stderr, /\/tribunal-review:review <file>/);
+      assert.match(r.stderr, /\/juryloop:review <file>/);
     }
   } finally { cleanup(repo); }
 });

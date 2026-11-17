@@ -1,6 +1,8 @@
 {
   "preset": "claude-plus-chatgpt",
   "judge": true,
+  "judgeWholeFiles": false,
+  "securityRaise": true,
   "modelsFile": "review/models.json",
   "reviewerPromptPath": "review/reviewer.md",
   "ledgerHome": "../tribunal-history/example-project",

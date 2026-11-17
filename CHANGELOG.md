@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.16.0 — 2026-11-16
+
+- **Renamed to Juryloop.** Plugin `juryloop`, slash command `/juryloop:review`, GitHub repository
+  `ViktoriousLLC/juryloop`, marketplace unchanged (`viktorious`). Upgrade: refresh the
+  marketplace (`claude plugin marketplace update viktorious`), install
+  `juryloop@viktorious`, uninstall the old plugin, and restart Claude Code so no open session keeps running the
+  old version. A repository that turns the plugin on by name in its own `.claude/settings.json`
+  must change that `enabledPlugins` key to `juryloop@viktorious` to restore reviews and the goal wall
+  (docs/REFERENCE.md, internal names). Kept on purpose: `~/.tribunal/`, `tribunal.config.json`, every `TRIBUNAL_*`
+  variable, the `tribunal/` plugin folder and the proof and eval-data markers, so existing
+  settings, history and trust bindings keep working.
+- The old `tribunal-review` name now installs a placeholder that holds every `gh pr merge` (even in
+  repositories that had turned the merge gate off) and tells the user how to switch, so an upgrade
+  cannot silently open the merge gate. Goal reviews stop until the switch; the placeholder says so
+  at session start.
+- The npm package and its commands are renamed too: `juryloop`, `juryloop-doctor`, `juryloop-probe`.
+- A demo round with no login (`/juryloop:review demo`) and `doctor --init`, which writes a starting
+  repository config from detected CLI logins.
+- A pull request can be checked against the goal it names.
+- Agreement across model makers ranks first, and security findings are raised one level.
+- Optional `judgeWholeFiles` gives the blinded judge full cited PR files from the reviewed
+  head commit with path and regular-file checks, merge-base goal-directory exclusion, 100 KB per file and 300 KB per round. Off by default;
+  only the judge receives the text, and the ledger records file paths, sizes and send/skip reasons.
+
 ## v0.15.0 — 2026-11-08
 
 - **STOP PATCHING** block: when this round and the previous round of the same artifact both

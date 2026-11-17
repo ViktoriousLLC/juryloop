@@ -1,0 +1,7 @@
+{
+  "security": "{\"findings\":[{\"title\":\"Missing ownership check\",\"severity\":\"SUGGESTION\",\"category\":\"security\",\"file\":\"record.js\",\"line\":12,\"why\":\"A different user can overwrite the record.\",\"check\":\"Try a second user.\"}]}",
+  "sameMaker": "{\"findings\":[{\"title\":\"Connection pool leaks handles\",\"severity\":\"SUGGESTION\",\"category\":\"correctness\",\"file\":\"db.js\",\"why\":\"The handle is never released.\",\"check\":\"Repeat a query.\"}]}",
+  "keep": "{\"findings\":[{\"id\":\"F1\",\"verdict\":\"keep\",\"why\":\"The endpoint writes without checking ownership.\"}]}",
+  "demote": "{\"findings\":[{\"id\":\"F1\",\"verdict\":\"demote\",\"why\":\"The artifact already checks ownership.\"}]}",
+  "unjudged": "{\"findings\":[]}"
+}

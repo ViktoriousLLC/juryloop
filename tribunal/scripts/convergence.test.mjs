@@ -19,6 +19,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadRegistry } from "./registry.mjs";
 import { argsForLeg } from "./legRunner.mjs";
+import { artifactHistory } from "./ledger.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RUNNER = resolve(process.env.TRIBUNAL_TEST_RUNNER || join(HERE, "run.mjs"));
@@ -31,7 +32,8 @@ const hash = (text) => createHash("sha256").update(text).digest("hex");
 
 function fixture(t, { modelsCache = { client_version: "0.163.0", models: loadRegistry()
   .filter((leg) => leg.runner === "codex-cli").map((leg) => ({ slug: leg.id, default_reasoning_level: "low" })) },
-  codexVersion = "0.163.0", actualClaudeModel = null } = {}) {
+  codexVersion = "0.163.0", actualClaudeModel = null, prBody = null, seatFindings = null, newInPrGoal = false } = {}) {
+  let prHead = "a".repeat(40);
   const root = mkdtempSync(join(tmpdir(), "tribunal-conversion-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const repo = join(root, "repo");
@@ -64,7 +66,20 @@ function fixture(t, { modelsCache = { client_version: "0.163.0", models: loadReg
   writeFileSync(join(ledger, "isolation-probe.md"), `OVERALL: PASS\n\n\`\`\`json\n${JSON.stringify(probeRecord, null, 2)}\n\`\`\`\n`);
   const wrapper = join(root, "invoke.mjs");
   writeFileSync(wrapper, `import { main } from ${JSON.stringify(pathToFileURL(RUNNER).href)};
-    await main({ probeOptions: ${probeOptions}, policyOptions: ${probeOptions}, modelOptions: {
+    await main({ artifactOptions: { exec: (cmd, args) => {
+      const head = process.env.TRIBUNAL_STUB_HEAD, base = "b".repeat(40), blob = "c".repeat(40);
+      if (cmd === "gh") return args[1] === "view"
+        ? JSON.stringify({ title: "CSV export", body: ${JSON.stringify(prBody)}, headRefOid: head, baseRefOid: base })
+        : "diff --git a/export.mjs b/export.mjs";
+      if (args[0] === "merge-base") return base;
+      if (args[0] === "ls-tree" && ${newInPrGoal} && args[3] === base) return "";
+      if (args[0] === "ls-tree") return args.at(-1) === "docs/reference/goals/work.md"
+        ? "100644 blob " + blob + "\\tdocs/reference/goals/work.md\\0" : "";
+      if (args[0] === "cat-file" && args[1] === "-e") return "";
+      if (args[0] === "cat-file" && args[1] === "-s") return "20";
+      if (args[0] === "cat-file" && args[1] === "blob") return "Item 2: Validate CSV.";
+      throw new Error("Unexpected fixture command: " + cmd + " " + args.join(" "));
+    } }, probeOptions: ${probeOptions}, policyOptions: ${probeOptions}, modelOptions: {
       spawnSyncFn: () => ({ status: 0, stdout: ${JSON.stringify(`codex-cli ${codexVersion}`)} }),
       readFile: () => ${JSON.stringify(JSON.stringify(modelsCache))},
     }, reviewLeg: async (leg, message, options) => {
@@ -73,13 +88,13 @@ function fixture(t, { modelsCache = { client_version: "0.163.0", models: loadReg
       const partial = process.env.TRIBUNAL_STUB === "partial";
       return { leg: leg.leg, model, kind: "answered", answered: true,
         parseFailed: partial, error: partial ? "unparseable test response" : null,
-        raw: "stub", findings: process.env.TRIBUNAL_STUB === "finding"
+        raw: "stub", findings: ${JSON.stringify(seatFindings)} ?? (process.env.TRIBUNAL_STUB === "finding"
           || (process.env.TRIBUNAL_STUB === "lone" && leg.leg === "opus") ? [${JSON.stringify(finding)}]
-          : process.env.TRIBUNAL_STUB === "other-file" ? [${JSON.stringify(otherFile)}] : [] };
+          : process.env.TRIBUNAL_STUB === "other-file" ? [${JSON.stringify(otherFile)}] : []) };
     }});`);
   const invoke = (args = [], mode = "quiet", cli = false) => spawnSync(process.execPath,
     [cli ? RUNNER : wrapper, ...args], { cwd: repo, encoding: "utf8", timeout: 15000,
-      env: { ...process.env, TRIBUNAL_STUB: mode } });
+      env: { ...process.env, TRIBUNAL_STUB: mode, TRIBUNAL_STUB_HEAD: prHead } });
   const rows = () => readdirSync(ledger).filter((name) => name.endsWith(".ndjson")).sort()
     .flatMap((name) => readFileSync(join(ledger, name), "utf8").trim().split("\n").filter(Boolean).map(JSON.parse));
   const seed = (round, { month = "2026-01", reason = "ACTIONABLE", contentHash = hash("A testable goal."), findings = [], kind = "document" } = {}) => {
@@ -88,8 +103,78 @@ function fixture(t, { modelsCache = { client_version: "0.163.0", models: loadReg
       actionableFindings: findings, actionable: findings.length, legs: [] };
     writeFileSync(join(ledger, `${month}.ndjson`), JSON.stringify(record) + "\n", { flag: "a" });
   };
-  return { root, repo, ledger, file, config, invoke, rows, seed, probeOptions };
+  return { root, repo, ledger, file, config, invoke, rows, seed, probeOptions,
+    setPrHead: (head) => { prHead = head; } };
 }
+
+test("an unusable PR goal still runs every reviewer and banks and renders its refusal", (t) => {
+  const f = fixture(t, { prBody: "Goal: reduce latency", seatFindings: [{ ...finding, kind: "bug" }] });
+  const result = f.invoke(["--pr", "7", "--json", "--no-judge"]);
+  assert.equal(result.status, 1, result.stderr);
+  const output = JSON.parse(result.stdout);
+  const row = f.rows().at(-1);
+  assert.equal(row.goal, undefined);
+  assert.match(row.goalRefusal.reason, /paths with spaces are not supported.*item N/);
+  assert.deepEqual(output.record.goalRefusal, row.goalRefusal);
+  assert.ok(row.legs.length >= 3);
+  assert.ok(row.legs.every((leg) => leg.answered && leg.findings === 1));
+  assert.equal(row.actionable, 1);
+  assert.equal(row.droppedMissingWork, 0);
+  assert.equal(row.findingList[0].kind ?? "defect", "defect");
+  const human = f.invoke(["--pr", "7", "--no-judge"]);
+  assert.equal(human.status, 1, human.stderr);
+  assert.ok(human.stdout.includes(`Goal line ignored: ${row.goalRefusal.reason}`));
+  assert.match(human.stdout, /Ownership check allows another user/);
+});
+
+test("selected goal item coercion and dropped missing work counts reach the report and ledger", (t) => {
+  const f = fixture(t, { prBody: "Goal: docs/reference/goals/work.md item 2", seatFindings: [
+    { ...finding, kind: "missing-work", goalItem: "2" },
+    { ...otherFile, kind: "missing-work", goalItem: null },
+    { ...sameFile, kind: "missing_work", goalItem: "item 3" },
+  ] });
+  const result = f.invoke(["--pr", "7", "--json", "--no-judge"]);
+  assert.equal(result.status, 1, result.stderr);
+  const output = JSON.parse(result.stdout);
+  const row = f.rows().at(-1);
+  assert.equal(row.goal.item, 2);
+  assert.equal(row.goalRefusal, undefined);
+  assert.equal(row.droppedMissingWork, row.legs.length);
+  assert.equal(output.record.droppedMissingWork, row.droppedMissingWork);
+  assert.equal(row.findingList.length, 2);
+  assert.ok(row.findingList.every((entry) => entry.kind === "missing-work" && entry.goalItem === 2));
+  assert.equal(row.findingList.find((entry) => entry.file === "session.js").severity, "SUGGESTION");
+  assert.equal(row.actionable, 1);
+  assert.equal(row.artifact.headSha, "a".repeat(40));
+  assert.equal(row.contentHash, row.artifact.headSha);
+  const human = f.invoke(["--pr", "7", "--no-judge"]);
+  assert.equal(human.status, 1, human.stderr);
+  assert.ok(human.stdout.includes(`Dropped ${row.droppedMissingWork} missing-work finding(s) naming an item other than selected item 2.`));
+});
+
+test("two heads of one PR with a new-in-PR goal share one ledger history", (t) => {
+  const f = fixture(t, { prBody: "Goal: docs/reference/goals/work.md item 2", newInPrGoal: true });
+  const heads = ["a".repeat(40), "d".repeat(40)];
+  for (const [index, head] of heads.entries()) {
+    f.setPrHead(head);
+    const result = f.invoke(["--pr", "7", "--json", "--no-judge", "--still-present", String(index)], "finding");
+    assert.equal(result.status, 1, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.record.runnerRound, index + 1);
+    assert.equal(output.record.contentHash, head);
+    assert.equal(output.record.artifact.headSha, head);
+    assert.equal(output.record.goal.source, "PR head");
+    assert.equal(output.record.goal.commit, head);
+    assert.equal(output.record.goal.path, "docs/reference/goals/work.md");
+    assert.equal(output.record.goal.item, 2);
+    if (index === 1) assert.equal(output.decision.action, "REDO");
+  }
+  const rows = f.rows();
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => row.runnerRound), [1, 2]);
+  const history = artifactHistory({ ...rows[1].artifact, goal: rows[1].goal }, f.ledger);
+  assert.deepEqual(history, rows);
+});
 
 test("resolved models and effort reach reviews, judge, status, footer and ledger", (t) => {
   const f = fixture(t, { actualClaudeModel: "claude-opus-5-5", modelsCache: {

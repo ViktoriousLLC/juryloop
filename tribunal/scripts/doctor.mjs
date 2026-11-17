@@ -2,7 +2,7 @@
 // Run from the consumer repository: node <plugin-root>/scripts/doctor.mjs.
 // No model requests: only help/auth status, credential names, and filesystem checks.
 import { spawnSync } from "node:child_process";
-import { readFileSync, mkdirSync, openSync, closeSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, unlinkSync, existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -10,7 +10,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { argsForLeg, envForLeg } from "./legRunner.mjs";
 import { resolveExe } from "./executable.mjs";
-import { resolvePolicy } from "./policy.mjs";
+import { findRepoRoot, resolvePolicy } from "./policy.mjs";
 
 const require = createRequire(import.meta.url);
 const NODE_RANGE = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).engines.node;
@@ -50,6 +50,60 @@ function authStatus(result) {
     ? JSON.stringify(Object.fromEntries(Object.entries(data).filter(([k]) => ["loggedIn", "authMethod", "subscriptionType"].includes(k))))
     : reply;
   return { login, billing, reply: shown || (result.error ? failureOf(result) : "(no output)") };
+}
+
+function cliInvoker(executable, cwd, env, spawnFn) {
+  return (args) => {
+    try {
+      return spawnFn(executable.file, [...executable.prefix, ...args], {
+        cwd, env, shell: false, encoding: "utf8", input: "",
+        timeout: PROBE_TIMEOUT_MS, maxBuffer: 1024 * 1024, windowsHide: true,
+      });
+    } catch (error) { return { error, status: null, stdout: "", stderr: "" }; }
+  };
+}
+
+export function detectCliAuth(command, invoke) {
+  // Root help advertises auth commands; Claude's review help only lists options.
+  const rootHelp = invoke(["--help"]);
+  const group = command === "claude" ? "auth" : "login";
+  if (!rootHelp.error && rootHelp.status === 0 && hasCommand(outputOf(rootHelp), group)) {
+    const groupHelp = invoke([group, "--help"]);
+    if (!groupHelp.error && groupHelp.status === 0 && hasCommand(outputOf(groupHelp), "status")) {
+      return authStatus(invoke([group, "status"]));
+    }
+  }
+  return { login: "not detectable", billing: "not detectable", reply: "(auth status not advertised by --help)" };
+}
+
+export function initConfig({ cwd = process.cwd(), sourceEnv = process.env,
+  spawnFn = spawnSync, resolveExeFn = resolveExe } = {}) {
+  const repoRoot = findRepoRoot(cwd), path = join(repoRoot, "tribunal.config.json");
+  const untouched = () => ({ lines: [`${path} exists and was left untouched.`], exitCode: 0 });
+  if (existsSync(path)) return untouched();
+  const registry = JSON.parse(readFileSync(new URL("./models.default.json", import.meta.url), "utf8")).legs;
+  const loggedIn = {};
+  for (const command of ["claude", "codex"]) {
+    const leg = registry.find((entry) => entry.runner === `${command}-cli`);
+    const { env } = envForLeg(leg, sourceEnv);
+    const executable = resolveExeFn(command, { env });
+    loggedIn[command] = executable.found
+      && detectCliAuth(command, cliInvoker(executable, repoRoot, env, spawnFn)).login === "logged-in";
+  }
+  const preset = loggedIn.codex ? "claude-plus-chatgpt" : "claude-only";
+  const why = loggedIn.claude && loggedIn.codex ? "Claude and Codex are both logged in"
+    : loggedIn.claude ? "only Claude is logged in"
+      : loggedIn.codex ? "only Codex is logged in; the Claude seat needs a sign-in"
+        : "neither CLI is logged in; starting with the Claude-only preset";
+  const config = { preset, judge: true, gates: { goalWall: true, mergeGate: true } };
+  try { writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { flag: "wx" }); }
+  catch (error) { if (error.code === "EEXIST") return untouched(); throw error; }
+  const lines = [`Wrote ${path}`, `Preset: ${preset} (${why}).`];
+  if (!loggedIn.claude) lines.push("Claude seat (opus) is not logged in yet or login could not be detected; sign in with: claude auth login");
+  if (!loggedIn.codex) lines.push("Codex seats (sol, astra) are not logged in yet or login could not be detected; sign in with: codex login");
+  const ready = loggedIn.claude && (preset === "claude-only" || loggedIn.codex);
+  if (!ready) lines.push("Claude seat (opus) must sign in before a panel can run.");
+  return { lines, exitCode: ready ? 0 : 1 };
 }
 
 function writableDirectory(path, create, openFile) {
@@ -95,14 +149,7 @@ export function runDoctor({ cwd = process.cwd(), policy = resolvePolicy(cwd), so
           "login: not detectable", "auth reply: (not run)", "billing: not detectable", "flags: not checked (binary missing)");
       } else {
         details.push(`binary: ${[executable.file, ...executable.prefix].join(" ")}`);
-        const invoke = (args) => {
-          try {
-            return spawnFn(executable.file, [...executable.prefix, ...args], {
-              cwd: policy.repoRoot, env, shell: false, encoding: "utf8", input: "",
-              timeout: PROBE_TIMEOUT_MS, maxBuffer: 1024 * 1024, windowsHide: true,
-            });
-          } catch (error) { return { error, status: null, stdout: "", stderr: "" }; }
-        };
+        const invoke = cliInvoker(executable, policy.repoRoot, env, spawnFn);
         const args = argsForLeg(leg);
         const help = invoke([...args, "--help"]);
         const flags = [...new Set(args.filter((value) => /^--?[^-]/.test(value)))];
@@ -112,19 +159,7 @@ export function runDoctor({ cwd = process.cwd(), policy = resolvePolicy(cwd), so
         const flagDetail = help.error || help.status !== 0 ? `help failed (${failureOf(help)})`
           : absent.length ? `missing ${absent.join(", ")}` : "accepted";
 
-        // Discover Claude's auth -> status and Codex's login -> status commands in CLI help
-        // before invoking them, so unsupported commands produce a named diagnostic.
-        // Always the ROOT help: `claude -p ... --help` prints the options only and omits the
-        // Commands section needed to discover authentication status.
-        const rootHelp = invoke(["--help"]);
-        const group = command === "claude" ? "auth" : "login";
-        let auth = { login: "not detectable", billing: "not detectable", reply: "(auth status not advertised by --help)" };
-        if (!rootHelp.error && rootHelp.status === 0 && hasCommand(outputOf(rootHelp), group)) {
-          const groupHelp = invoke([group, "--help"]);
-          if (!groupHelp.error && groupHelp.status === 0 && hasCommand(outputOf(groupHelp), "status")) {
-            auth = authStatus(invoke([group, "status"]));
-          }
-        }
+        const auth = detectCliAuth(command, invoke);
         details.push(`login: ${auth.login}`, `auth reply: ${auth.reply}`, `billing: ${auth.billing}`, `flags: ${flagDetail}`);
         runnable &&= flagsOK && auth.login === "logged-in";
       }
@@ -189,11 +224,11 @@ export function runDoctor({ cwd = process.cwd(), policy = resolvePolicy(cwd), so
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const result = runDoctor();
+    const result = process.argv.includes("--init") ? initConfig() : runDoctor();
     console.log(result.lines.join("\n"));
     process.exitCode = result.exitCode;
   } catch (error) {
-    console.error(`tribunal doctor failed: ${error.message}`);
+    console.error(`Juryloop doctor failed: ${error.message}`);
     process.exitCode = 1;
   }
 }

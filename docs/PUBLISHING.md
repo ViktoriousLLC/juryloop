@@ -1,4 +1,4 @@
-# Publishing tribunal-review
+# Publishing juryloop
 
 Three channels. The first is live once the repository is public; the other two need the
 maintainer's own accounts and are one command or one form each.
@@ -6,15 +6,15 @@ maintainer's own accounts and are one command or one form each.
 ## 1. GitHub marketplace (live)
 
 The repository root carries `.claude-plugin/marketplace.json` (marketplace `viktorious`, one
-entry `tribunal-review` whose source is `./tribunal`). Inside Claude Code v2.1.275 or later:
+entry `juryloop` whose source is `./tribunal`). Inside Claude Code v2.1.275 or later:
 
 ```text
-/plugin install tribunal-review --marketplace ViktoriousLLC/tribunal-review
+/plugin install juryloop --marketplace ViktoriousLLC/juryloop
 ```
 
-Older versions: `/plugin marketplace add ViktoriousLLC/tribunal-review`, then `/plugin install tribunal-review@viktorious`.
+Older versions: `/plugin marketplace add ViktoriousLLC/juryloop`, then `/plugin install juryloop@viktorious`.
 
-The review command is `/tribunal-review:review <file | PR number>`.
+The review command is `/juryloop:review <file | PR number>`.
 
 Every release: if it touches the hooks, policy or the ledger row shape, run the break-it pass in
 `docs/BREAK-IT.md` first and act on its report. Then bump `version` in
@@ -46,10 +46,10 @@ npm publish                   # publishConfig.access is public
 A marketplace entry that points at the npm package instead of the git tree:
 
 ```json
-{ "name": "tribunal-review", "source": { "source": "npm", "package": "tribunal-review", "version": "^0.9.0" } }
+{ "name": "juryloop", "source": { "source": "npm", "package": "juryloop", "version": "^0.16.0" } }
 ```
 
-Use the package name `tribunal-review`. The unrelated package `tribunal` is a separate project.
+Use the package name `juryloop`. The unrelated package `tribunal` is a separate project.
 
 ## 3. Anthropic's community marketplace (maintainer submits)
 
@@ -61,12 +61,12 @@ https://platform.claude.com/plugins/submit
 is the one for an individual maintainer.) Run `claude plugin validate --strict ./tribunal` first. Listed
 plugins appear in `anthropics/claude-plugins-community`, pinned to a commit SHA, after a delay.
 Users then install with `/plugin marketplace add anthropics/claude-plugins-community` and
-`/plugin install tribunal-review@claude-community`.
+`/plugin install juryloop@claude-community`.
 
 Suggested submission text:
 
-> **Name:** tribunal-review
-> **Repository:** https://github.com/ViktoriousLLC/tribunal-review (plugin root: `tribunal/`)
+> **Name:** juryloop
+> **Repository:** https://github.com/ViktoriousLLC/juryloop (plugin root: `tribunal/`)
 > **Description:** Cross-model review panel for Claude Code. Reviews pull requests, files,
 > goal statements and pasted text with a parallel panel of models (Claude, Codex, optionally
 > Gemini or any OpenAI-compatible endpoint) on the subscriptions the user already holds. Every
@@ -74,7 +74,7 @@ Suggested submission text:
 > never counts as agreement; metered spend is measured or reported as unknown, never as zero.
 > No telemetry: the runner contacts only the model vendors the user configured (fixture-checked).
 > Licence Apache-2.0. Demo repository with planted defects:
-> https://github.com/ViktoriousLLC/tribunal-review-demo
+> https://github.com/ViktoriousLLC/juryloop-demo
 
 ## A permanent name
 

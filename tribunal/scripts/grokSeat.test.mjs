@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { argsForLeg, envForLeg, runLeg, unwrapGrokOutput, GROK_DISALLOWED_TOOLS, GROK_FIXED_ENV } from "./legRunner.mjs";
 import { validateLegs, seatExpired } from "./registry.mjs";
 import { resolvePolicy } from "./policy.mjs";
@@ -129,7 +129,7 @@ test("runLeg runs grok with the message on stdin and its homes in the fresh dire
 });
 
 test("resolveExe finds grok in the installer's ~/.grok/bin when PATH predates the install", () => {
-  const installed = join("C:\\Users\\u", ".grok", "bin", "grok.exe");
+  const installed = win32.join("C:\\Users\\u", ".grok", "bin", "grok.exe");
   const r = resolveExe("grok", { env: { Path: "C:\\nowhere", USERPROFILE: "C:\\Users\\u" }, platform: "win32",
     isFile: (p) => p === installed });
   assert.equal(r.found, true);

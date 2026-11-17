@@ -150,7 +150,7 @@ test("render annotates by lone cluster order even with nits and duplicate titles
   assert.ok(output.includes("_(opus)_ · judge: keep"));
   assert.ok(output.includes("_(sol)_ · judge: likely false positive: Checked at line 10."));
   assert.ok(!/Spacing.*judge:/.test(output), "a nit is never judged");
-  assert.ok(output.includes(`_Blinded judge (${opus.id}, trial): 1 keep · 1 likely false · 1 not judged. Annotation only; it changes no count, verdict or gate._`));
+  assert.ok(output.includes(`_Blinded judge (${opus.id}, trial): 1 keep · 1 likely false · 1 not judged. Kept security findings may be raised; demotions do not lower severity._`));
   for (const reason of ["turned off", "no single-model findings"]) {
     assert.equal(render({ ...options, judge: { ran: false, reason } }), render(options));
   }

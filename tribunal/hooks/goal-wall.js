@@ -286,7 +286,7 @@ async function main() {
       ledgerHome = policy.ledgerHome;
       goalsDir = policy.goalsDir;
     } catch (e) {
-      degraded = `tribunal policy could not be resolved: ${e.message}`;
+      degraded = `Juryloop policy could not be resolved: ${e.message}`;
     }
     const glass = breakGlass(root);
     if (glass) {
@@ -359,7 +359,7 @@ async function main() {
   } else {
     lines.push(`${PREFIX} BLOCKED: ${unpaid.length} goal file(s) differ from origin/main and have no complete panel row for their current content:`);
     for (const u of unpaid) lines.push(`  - ${u.rel}${u.ledgerMissing ? ' (ledger directory missing: run the isolation probe first)' : ''}`);
-    lines.push('Clear it by running the panel on each file: /tribunal-review:review <file>  (CLI: the plugin runner with --file <file>), then end the reply again.');
+    lines.push('Clear it by running the panel on each file: /juryloop:review <file>  (CLI: the plugin runner with --file <file>), then end the reply again.');
   }
   lines.push(`Block ${Math.max(...blockable.map((k) => state[k]))} of ${MAX_BLOCKS} for this content this session; after ${MAX_BLOCKS} the wall stands down loudly. Break-glass: ${BREAK_GLASS}.`);
   process.stderr.write(`${lines.join('\n')}\n`);

@@ -285,8 +285,9 @@ test("fromPr records its number and head SHA from the same metadata call", (t) =
   assert.deepEqual(fromPr(359, { exec: makeExec({ title: "x", body: "y", headRefOid: "a".repeat(40) }) }), {
     kind: "diff", source: "PR #359", title: "x", text: "y\n\ndiff --git a/x b/x",
     prNumber: 359, headSha: "a".repeat(40), contentHash: "a".repeat(40),
+    baseSha: null, diff: "diff --git a/x b/x",
   });
-  assert.deepEqual(calls[0].slice(-2), ["--json", "title,body,headRefOid"]);
+  assert.deepEqual(calls[0].slice(-2), ["--json", "title,body,headRefOid,baseRefName,baseRefOid"]);
   assert.equal(fromPr(359, { exec: makeExec({ title: "x", body: "y", headRefOid: 42 }) }).headSha, null);
 });
 
@@ -308,13 +309,52 @@ test("fromPr: a head that MOVES during the diff withholds the certification", ()
   assert.equal(call, 3, "metadata, diff, then the re-read");
 });
 
-test("fromPr: a head that HOLDS STILL is certified", () => {
+test("fromPr: a head that HOLDS STILL is certified and is the exact hash without a goal", () => {
   const head = "c".repeat(40);
   const exec = (_cmd, args) => args.includes("diff")
     ? "diff text"
     : JSON.stringify({ title: "t", body: "b", headRefOid: head });
   assert.equal(fromPr(9, { exec }).headSha, head);
   assert.equal(fromPr(9, { exec }).contentHash, head);
+});
+
+test("PR content hash is the verified head regardless of goal context", () => {
+  const head = "a".repeat(40), base = "b".repeat(40), blob = "c".repeat(40);
+  const read = ({ path = "docs/reference/goals/work.md", item = "item 2", commit = base,
+    text = "Item 2: validate CSV.", reviewedHead = head, afterHead = reviewedHead } = {}) => {
+    const exec = (cmd, args) => {
+      if (cmd === "gh") {
+        if (args[1] === "diff") return "diff text";
+        if (args.at(-1) === "headRefOid") return JSON.stringify({ headRefOid: afterHead });
+        return JSON.stringify({ title: "CSV", body: `Goal: ${path} ${item}`,
+          headRefOid: reviewedHead, baseRefOid: base });
+      }
+      if (args[0] === "merge-base") return commit;
+      if (args[0] === "ls-tree") return args.at(-1) === path ? `100644 blob ${blob}\t${path}\0` : "";
+      if (args[0] === "cat-file" && args[1] === "-e") return "";
+      if (args[0] === "cat-file" && args[1] === "-s") return String(Buffer.byteLength(text));
+      if (args[0] === "cat-file" && args[1] === "blob") return text;
+      assert.fail(`Unexpected command: ${cmd} ${args.join(" ")}`);
+    };
+    return fromPr(9, { exec });
+  };
+  const original = read();
+  assert.equal(original.headSha, head);
+  assert.equal(original.contentHash, head);
+  assert.equal(read().contentHash, original.contentHash);
+  assert.equal(read({ item: "Item 2 (notes here)" }).contentHash, original.contentHash);
+  for (const change of [{ path: "docs/reference/goals/other.md" }, { item: "item 3" },
+    { item: "" }, { commit: "d".repeat(40) }, { text: "Item 2: reject invalid CSV." }]) {
+    const changed = read(change);
+    assert.ok(changed.goal);
+    assert.equal(changed.headSha, head);
+    assert.equal(changed.contentHash, head, JSON.stringify(change));
+  }
+  assert.equal(read({ reviewedHead: "e".repeat(40) }).contentHash, "e".repeat(40));
+  const raced = read({ afterHead: "f".repeat(40) });
+  assert.ok(raced.goal);
+  assert.equal(raced.headSha, null);
+  assert.equal(raced.contentHash, null);
 });
 
 test("fromPr: an unreadable re-read withholds too", () => {

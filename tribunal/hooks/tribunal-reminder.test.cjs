@@ -1,4 +1,4 @@
-// Tests for the Tribunal reminder hook with isolated policy/ledger paths.
+// Tests for Juryloop reminder hook with isolated policy/ledger paths.
 //
 // The hook is SPAWNED, never required. A Claude hook reads stdin at load, so an in-process
 // import can hang a runner with no failing assertion. spawnSync closes stdin; require does not.
@@ -50,7 +50,7 @@ test("a gh pr merge for an unreviewed PR blocks with exit 2 and names the comman
   const r = fire({ tool_name: "Bash", tool_input: { command: "gh pr merge 999123 --squash" } });
   assert.equal(r.code, 2, "an unreviewed PR must block by default");
   assert.match(r.err, /PR #999123 has no recorded local panel/);
-  assert.match(r.err, /\/tribunal-review:review 999123/);
+  assert.match(r.err, /\/juryloop:review 999123/);
   assert.match(r.err, /Block 1 of 3/);
   assert.equal(r.out, "", "a block is reported through stderr");
 });
@@ -105,7 +105,7 @@ test("gates.mergeGate false restores the reminder-only behaviour", () => {
   assert.equal(r.code, 0);
   assert.match(r.notice, /PR #999128 has no recorded local panel/);
   assert.match(r.notice, /reminder only, not a block/);
-  assert.match(r.notice, /\/tribunal-review:review 999128/);
+  assert.match(r.notice, /\/juryloop:review 999128/);
 });
 
 test("unreadable or unwritable merge state stands down loudly without blocking", () => {
@@ -172,7 +172,7 @@ test("every identified PR in a merge chain is gated even after a reviewed or bar
     ].entries()) {
       const r = fire({ session_id: `multiple-merges-${index}`, tool_name: "Bash", tool_input: { command } });
       assert.equal(r.code, 2, command);
-      assert.match(r.err, /\/tribunal-review:review 777004/);
+      assert.match(r.err, /\/juryloop:review 777004/);
       assert.doesNotMatch(r.err, /PR #777003/);
     }
   } finally { rmSync(marker, { force: true }); }
@@ -185,8 +185,8 @@ test("a merge chain deduplicates PR budgets and emits one notice after all budge
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     const r = fire(payload);
     assert.equal(r.code, 2);
-    assert.match(r.err, /\/tribunal-review:review 777005/);
-    assert.match(r.err, /\/tribunal-review:review 777006/);
+    assert.match(r.err, /\/juryloop:review 777005/);
+    assert.match(r.err, /\/juryloop:review 777006/);
     const state = JSON.parse(readFileSync(join(LEDGER, "merge-state-deduplicated-merges.json"), "utf8"));
     assert.equal(state["PR #777005"], attempt);
     assert.equal(state["PR #777006"], attempt);

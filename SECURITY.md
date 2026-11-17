@@ -1,6 +1,6 @@
 # Security
 
-Tribunal sends the selected artifact and reviewer prompt to the model vendors enabled in
+Juryloop sends the selected artifact and reviewer prompt to the model vendors enabled in
 the consuming repository's policy. Review artifacts are untrusted input. The local CLI
 processes run as your user and can authenticate through your existing vendor login stores;
 their tool restrictions must hold before a review is admitted.
@@ -113,7 +113,7 @@ The default Stop hook requires a complete document panel row for the current byt
 that differs from `origin/main`. The merge gate requires a complete (non-PARTIAL) diff panel
 row for an explicit PR number in `gh pr merge`; it does not verify the PR's current head, and a
 merge hidden inside `bash -c`, a script file or an alias is not seen. Both direct the assistant
-to `/tribunal-review:review`. They block at most three times per item per session, then stand
+to `/juryloop:review`. They block at most three times per item per session, then stand
 down with a notice. These local controls do not replace repository branch protection.
 
 Consumer config can disable either gate through `gates.goalWall` or `gates.mergeGate`.

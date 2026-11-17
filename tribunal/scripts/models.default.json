@@ -1,6 +1,6 @@
 {
   "$comment": [
-    "One registry row defines each Tribunal leg, including all fallback model ids.",
+    "One registry row defines each Juryloop leg, including all fallback model ids.",
     "Plan legs authenticate through the installed vendor CLI and receive no spend-capable API key.",
     "envKeys lists environment variable NAMES allowed through; requiredEnv names variables required to run.",
     "Credentials are supplied by the invoking process environment or the vendor CLI account store. No credential files are loaded.",
@@ -12,7 +12,7 @@
     {
       "leg": "opus",
       "id": "opus",
-      "vendor": "anthropic",
+      "vendor": "Anthropic",
       "runner": "claude-cli",
       "billing": "plan",
       "envKeys": [
@@ -24,7 +24,7 @@
     {
       "leg": "fable",
       "id": "fable",
-      "vendor": "anthropic",
+      "vendor": "Anthropic",
       "runner": "claude-cli",
       "billing": "plan",
       "envKeys": [
@@ -38,7 +38,7 @@
       "leg": "sol",
       "id": "gpt-5.6-sol",
       "family": "sol",
-      "vendor": "openai",
+      "vendor": "OpenAI",
       "runner": "codex-cli",
       "billing": "plan",
       "envKeys": [
@@ -51,7 +51,7 @@
       "leg": "astra",
       "id": "gpt-6-astra",
       "family": "astra",
-      "vendor": "openai",
+      "vendor": "OpenAI",
       "runner": "codex-cli",
       "billing": "plan",
       "envKeys": [
@@ -64,7 +64,7 @@
       "leg": "gemini",
       "id": "gemini-3.8-flash",
       "fallback": "gemini-3.7-flash",
-      "vendor": "google",
+      "vendor": "Google",
       "runner": "genai-sdk",
       "billing": "metered",
       "envKeys": [
@@ -98,7 +98,7 @@
       "leg": "antigravity",
       "id": "gemini-4-argon-medium",
       "fallback": "gemini-3.8-flash-high",
-      "vendor": "google",
+      "vendor": "Google",
       "runner": "agy-cli",
       "billing": "plan",
       "envKeys": [],

@@ -34,7 +34,7 @@ const nit = { title: "trailing whitespace", severity: "NIT", category: "style", 
 
 test("the first line after the title answers 'do I have to do anything' and nothing else", () => {
   const lines = build({ clusters: [blocker] }).split("\n");
-  assert.match(lines[0], /^## 🧑‍⚖️ Tribunal/);
+  assert.match(lines[0], /^## 🧑‍⚖️ Juryloop/);
   assert.match(lines[2], /^⛔ 1 to act on/);
 });
 

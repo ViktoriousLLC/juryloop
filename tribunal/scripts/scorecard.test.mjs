@@ -54,6 +54,40 @@ test("scorecard matches across rounds in history order and keeps IDs when rows a
   assert.match(renderScorecard(after), /P1 \[BLOCKER\].*found by sol, opus/);
 });
 
+test("goal finding kinds and items survive matching across rounds", () => {
+  const findingList = [finding({ kind: "missing-work", goalItem: 2 }), finding({ kind: "unrequested-scope" }), finding()];
+  const card = buildScorecard([row(1, { findingList }), row(2, { findingList })]);
+  assert.equal(card.unique, 3);
+  assert.ok(card.problems.every((problem) => problem.rounds.join(",") === "1,2"));
+  assert.equal(card.problems[0].kind, "missing-work");
+  assert.equal(card.problems[0].goalItem, 2);
+  assert.equal(card.problems[1].kind, "unrequested-scope");
+});
+
+test("PR ledger history and scorecard selector ignore goal context", (t) => {
+  const f = fixture(t);
+  const goal = { path: "docs/reference/goals/work.md", item: 2, commit: "a".repeat(40) };
+  const artifact = { prNumber: 42, goal };
+  const before = artifactHistory(artifact, f.ledger);
+  const added = [row(3, { goal }),
+    row(4, { goal: { ...goal, item: 3 } }),
+    row(5, { goal: { ...goal, path: "docs/reference/goals/other.md" } }),
+    row(6, { goal: { ...goal, commit: "b".repeat(40) } }),
+  ];
+  writeFileSync(join(f.ledger, "2026-11.ndjson"), added.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+  const history = [...before, ...added];
+  assert.deepEqual(artifactHistory(artifact, f.ledger), history);
+  const key = artifactKey(artifact);
+  assert.equal(key, "pr:42");
+  const line = scorecardRunningLine(buildScorecard(history), artifact);
+  assert.ok(line.endsWith("--pr 42)"));
+  assert.doesNotMatch(line, /--source/);
+  const result = f.invoke("--pr", "42", "--mark", "P1:real", "--json");
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).rounds, history.length);
+  assert.equal(readMarks(f.ledger, key)[0].key, key);
+});
+
 test("fix1 scorecard: backdated appended rows preserve problem IDs and marks", (t) => {
   const f = fixture(t), artifact = { prNumber: 42 };
   const before = buildScorecard(artifactHistory(artifact, f.ledger));

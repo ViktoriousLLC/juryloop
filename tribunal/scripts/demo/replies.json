@@ -1,0 +1,56 @@
+[
+  {
+    "leg": "opus",
+    "model": "opus",
+    "kind": "answered",
+    "answered": true,
+    "parseFailed": false,
+    "findings": [
+      {
+        "title": "Each full page drops its last item",
+        "severity": "BLOCKER",
+        "category": "correctness",
+        "file": "src/catalogPage.mjs",
+        "line": 15,
+        "why": "Array.slice excludes its end index. Subtracting one drops the last item of every full page, and the next page starts after that omitted item.",
+        "check": "catalogPage(['a', 'b', 'c', 'd'], 0, 2).entries should be ['a', 'b']; it returns ['a']."
+      }
+    ]
+  },
+  {
+    "leg": "sol",
+    "model": "gpt-5.6-sol",
+    "kind": "answered",
+    "answered": true,
+    "parseFailed": false,
+    "findings": [
+      {
+        "title": "Each full page drops its last item",
+        "severity": "BLOCKER",
+        "category": "correctness",
+        "file": "src/catalogPage.mjs",
+        "line": 15,
+        "why": "The computed end is inclusive, but slice expects an exclusive bound. A page size of one returns an empty page even when an item exists.",
+        "check": "catalogPage(['a'], 0, 1).entries must contain 'a'."
+      }
+    ]
+  },
+  {
+    "leg": "astra",
+    "model": "gpt-6-astra",
+    "kind": "answered",
+    "answered": true,
+    "parseFailed": false,
+    "findings": [
+      {
+        "title": "Reject fractional page sizes",
+        "severity": "SUGGESTION",
+        "category": "correctness",
+        "file": "src/catalogPage.mjs",
+        "line": 8,
+        "why": "The size check accepts 1.5. Slice truncates fractional offsets while pageCount uses the fraction, so the page metadata no longer describes fixed-size groups of items.",
+        "check": "After fixing the end bound, test pageSize = 1.5 and require a RangeError, as with fractional page numbers."
+      }
+    ]
+  }
+]

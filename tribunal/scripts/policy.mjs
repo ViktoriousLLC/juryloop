@@ -33,7 +33,7 @@ function skipUninstalledSeats(registry, { enabledLegs, customRegistry, resolveEx
   });
 }
 
-export function resolvePolicy(cwd = process.cwd(), { resolveExecutable = resolveExe, now = new Date(), platform = process.platform } = {}) {
+export function findRepoRoot(cwd = process.cwd()) {
   const workingDirectory = resolve(cwd);
   let repoRoot = workingDirectory;
   for (let candidate = workingDirectory; ; candidate = dirname(candidate)) {
@@ -41,10 +41,15 @@ export function resolvePolicy(cwd = process.cwd(), { resolveExecutable = resolve
     if (existsSync(join(candidate, ".git"))) { repoRoot = candidate; break; }
     if (dirname(candidate) === candidate) break;
   }
+  return repoRoot;
+}
+
+export function resolvePolicy(cwd = process.cwd(), { resolveExecutable = resolveExe, now = new Date(), platform = process.platform } = {}) {
+  const repoRoot = findRepoRoot(cwd);
   const configFile = join(repoRoot, "tribunal.config.json");
   const config = existsSync(configFile) ? JSON.parse(readFileSync(configFile, "utf8")) : {};
   if (!config || Array.isArray(config) || typeof config !== "object") throw new Error("tribunal.config.json must be an object");
-  const allowed = new Set(["preset", "modelsFile", "reviewerPromptPath", "ledgerHome", "goalsDir", "enabledLegs", "disabledLegs", "envFile", "gates", "judge"]);
+  const allowed = new Set(["preset", "modelsFile", "reviewerPromptPath", "ledgerHome", "goalsDir", "enabledLegs", "disabledLegs", "envFile", "gates", "judge", "securityRaise", "judgeWholeFiles"]);
   for (const key of Object.keys(config)) {
     if (!allowed.has(key)) throw new Error(`unsupported tribunal.config.json field: ${key}; configure paths, leg names, and gate switches only, never credentials`);
   }
@@ -59,6 +64,10 @@ export function resolvePolicy(cwd = process.cwd(), { resolveExecutable = resolve
   }
   if (config.judge !== undefined && typeof config.judge !== "boolean") throw new Error("judge must be a boolean");
   const judge = config.judge ?? true;
+  if (config.judgeWholeFiles !== undefined && typeof config.judgeWholeFiles !== "boolean") throw new Error("judgeWholeFiles must be a boolean");
+  const judgeWholeFiles = config.judgeWholeFiles ?? false;
+  if (config.securityRaise !== undefined && typeof config.securityRaise !== "boolean") throw new Error("securityRaise must be a boolean");
+  const securityRaise = config.securityRaise ?? true;
   const gates = { goalWall: true, mergeGate: true };
   if (config.gates !== undefined) {
     if (!config.gates || Array.isArray(config.gates) || typeof config.gates !== "object") throw new Error("gates must be an object");
@@ -106,6 +115,6 @@ export function resolvePolicy(cwd = process.cwd(), { resolveExecutable = resolve
   for (const leg of [...enabledLegs, ...disabledLegs]) {
     if (!registry.some((entry) => entry.leg === leg)) throw new Error(`unknown configured leg: ${leg}`);
   }
-  return { repoRoot, repoSlug, configFile, modelsFile, reviewerPromptPath, ledgerHome, goalsDir, envFile, gates, judge,
+  return { repoRoot, repoSlug, configFile, modelsFile, reviewerPromptPath, ledgerHome, goalsDir, envFile, gates, judge, securityRaise, judgeWholeFiles,
     probeRecord: join(ledgerHome, "isolation-probe.md"), enabledLegs, disabledLegs, registry };
 }

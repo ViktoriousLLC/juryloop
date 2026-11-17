@@ -242,7 +242,7 @@ export async function writeProbeRecord(policy, verdicts,
   const bindingRecord = { schemaVersion: 1, probeVersion, measuredAt: measuredAt.toISOString(),
     enabledCliRunners, cli, overall: recorded };
   const record = [
-    "# Tribunal isolation probe", "", `Measured: ${measuredAt.toISOString()}`,
+    "# Juryloop isolation probe", "", `Measured: ${measuredAt.toISOString()}`,
     `Repository: ${policy.repoRoot}`, `Models file: ${policy.modelsFile}`,
     ...(only ? [`Requested runner: ${only}`] : []), "",
     ...Object.entries(effectiveVerdicts).map(([name, result]) => `${name}: ${result.verdict} — ${result.why}`), "",
@@ -323,7 +323,7 @@ async function main() {
     }
     console.log(JSON.stringify({ overall, verdicts, canaryPath, transcripts, recorded, probeRecord: policy.probeRecord }, null, 2));
   } else {
-    console.log("\nTribunal isolation probe\n");
+    console.log("\nJuryloop isolation probe\n");
     console.log("leg     control-leaked  guarded-leaked  verdict  why");
     for (const [name, v] of Object.entries(verdicts)) {
       const r = results[name];

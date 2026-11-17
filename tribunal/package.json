@@ -1,6 +1,6 @@
 {
-  "name": "tribunal-review",
-  "version": "0.15.0",
+  "name": "juryloop",
+  "version": "0.16.0",
   "description": "Cross-model review panel for Claude Code: reviews PRs, files, goal statements and pasted text on the Claude and ChatGPT subscriptions you already hold, with an enforced convergence loop and honest cost reporting.",
   "license": "Apache-2.0",
   "author": "Viktorious LLC",
@@ -15,9 +15,9 @@
     "gemini"
   ],
   "bin": {
-    "tribunal-review": "./scripts/run.mjs",
-    "tribunal-review-doctor": "./scripts/doctor.mjs",
-    "tribunal-review-probe": "./scripts/isolationProbe.mjs"
+    "juryloop": "./scripts/run.mjs",
+    "juryloop-doctor": "./scripts/doctor.mjs",
+    "juryloop-probe": "./scripts/isolationProbe.mjs"
   },
   "files": [
     ".claude-plugin/",
@@ -39,13 +39,13 @@
   "publishConfig": {
     "access": "public"
   },
-  "homepage": "https://github.com/ViktoriousLLC/tribunal-review#readme",
+  "homepage": "https://github.com/ViktoriousLLC/juryloop#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ViktoriousLLC/tribunal-review.git",
+    "url": "git+https://github.com/ViktoriousLLC/juryloop.git",
     "directory": "tribunal"
   },
   "bugs": {
-    "url": "https://github.com/ViktoriousLLC/tribunal-review/issues"
+    "url": "https://github.com/ViktoriousLLC/juryloop/issues"
   }
 }

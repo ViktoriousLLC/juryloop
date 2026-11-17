@@ -23,8 +23,8 @@ for (const [stage, failureAt] of [["metadata read", 1], ["diff read", 2], ["head
       return args.includes("diff") ? "diff text" : JSON.stringify({ title: "Review", headRefOid: HEAD });
     };
     try { fromPr(7, { exec }); }
-    catch (error) { console.error("tribunal run failed:", error.message); }
-    assert.deepEqual(messages, [`tribunal run failed: ${MESSAGE}`]);
+    catch (error) { console.error("Juryloop run failed:", error.message); }
+    assert.deepEqual(messages, [`Juryloop run failed: ${MESSAGE}`]);
     assert.equal(calls, failureAt, "stop before any subsequent gh request");
   });
 }

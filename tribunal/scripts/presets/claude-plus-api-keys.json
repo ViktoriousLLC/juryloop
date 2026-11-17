@@ -9,7 +9,7 @@
     {
       "leg": "opus",
       "id": "opus",
-      "vendor": "anthropic",
+      "vendor": "Anthropic",
       "runner": "claude-cli",
       "billing": "plan",
       "envKeys": [
@@ -22,7 +22,6 @@
       "$comment": "Example only. Empty price pins are intentionally UNPRICED; configure verified pricesUSDPer1M for the selected model.",
       "leg": "compatible",
       "id": "your-model-id",
-      "vendor": "compatible",
       "runner": "openai-api",
       "baseUrl": "https://api.example.com/v1",
       "billing": "metered",

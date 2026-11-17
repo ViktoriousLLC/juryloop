@@ -25,8 +25,8 @@ import { isRecordableRound } from "./panelLogic.mjs";
 /** Require enough independent reviewers for a local PR review proof. */
 const MIN_PROOF_LEGS = 3;
 import { runLeg, classifyLegOutcome } from "./legRunner.mjs";
-import { fromFile, fromText, fromPr, buildUserMessage, GH_MISSING_MESSAGE } from "./artifact.mjs";
-import { clusterFindings, summariseRound, loopDecision, soleFindsByLeg, trendLine } from "./panelLogic.mjs";
+import { fromFile, fromText, fromPr, buildUserMessage, goalContext, GH_MISSING_MESSAGE } from "./artifact.mjs";
+import { clusterFindings, raiseSecurityFindings, summariseRound, loopDecision, soleFindsByLeg, trendLine } from "./panelLogic.mjs";
 import { render } from "./render.mjs";
 import { runJudge, pickJudgeLeg, loneFindings } from "./judge.mjs";
 import { resolvePolicy } from "./policy.mjs";
@@ -207,10 +207,10 @@ export function isolationGate(policy, { readFile = readFileSync, ...bindingOptio
   return { ok: true, why: "reading a RECORDED pass bound to the enabled CLI types, executables, versions and argv shapes; not re-measuring isolation" };
 }
 
-function buildArtifact() {
+function buildArtifact(options = {}) {
   const file = arg("file"), pr = arg("pr"), title = arg("title");
   if (file) return fromFile(file);
-  if (pr) return fromPr(pr, { repo: arg("repo") || undefined });
+  if (pr) return fromPr(pr, { ...options, repo: arg("repo") || undefined });
   if (flag("stdin")) return fromText(readFileSync(0, "utf8"), title || "pasted text");
   throw new Error("give the panel something to read: --file <path>, --pr <n>, or --stdin");
 }
@@ -218,9 +218,12 @@ function buildArtifact() {
 /** The Judge numbers only lone non-nits; retain that join separately from cluster order. */
 export function findingList(clusters) {
   const judgeIds = new Map(loneFindings(clusters).map(({ id, cluster }) => [cluster, id]));
-  return clusters.map(({ title, severity, category, file, line, foundBy }, index) => ({
+  return clusters.map(({ title, severity, category, file, line, foundBy, raised }, index) => ({
     id: `F${index + 1}`, title, severity, category, file, line, foundBy,
+    ...(clusters[index].kind ? { kind: clusters[index].kind } : {}),
+    ...(clusters[index].kind === "missing-work" ? { goalItem: clusters[index].goalItem } : {}),
     judgeId: judgeIds.get(clusters[index]) ?? null,
+    ...(raised ? { raised } : {}),
   }));
 }
 
@@ -366,6 +369,7 @@ export function renderAdvisory(advisory) {
 
 /** Any enabled leg without parseable findings leaves the round PARTIAL. */
 export function panelRound(results, clusters, options = {}) {
+  clusters = raiseSecurityFindings(clusters, { judge: options.judge, enabled: options.securityRaise !== false });
   const remaining = results.filter((r) => r.kind !== "not-run");
   const summary = summariseRound({ legs: results, findings: clusters });
   const failed = results.filter((r) => r.kind === "not-run" || r.kind === "failed" || !r.answered || r.parseFailed);
@@ -374,7 +378,7 @@ export function panelRound(results, clusters, options = {}) {
     action: "STOP", reason: "PARTIAL",
     why: `the panel was incomplete: ${failed.map((r) => `${r.leg}: ${r.error || r.reason || "unparseable findings"}`).join("; ")}. Fix the leg and rerun; PARTIAL does not end the convergence loop.`,
   } : loopDecision({ ...options, summary });
-  return { remaining, summary, decision };
+  return { clusters, remaining, summary, decision };
 }
 
 /**
@@ -489,7 +493,7 @@ export function postLocalProof(artifact, round, elapsedMs, results, repo, spawn 
     : payload.actionable === 0
       ? " No actionable findings."
       : ` **${payload.actionable} actionable finding(s)** — read them before merging.`;
-  const body = `${PROOF_MARKER}\nLocal Tribunal round ${round}: ${read.length} of ${remaining.length} legs read, ${elapsedSeconds}s.${outcome}\n\n${proofCostLine(metered)}\n\n${panelStatus(results)}\n\n<!-- eval-data:v1: ${Buffer.from(JSON.stringify(payload), "utf8").toString("base64")} :end -->`;
+  const body = `${PROOF_MARKER}\nLocal Juryloop round ${round}: ${read.length} of ${remaining.length} legs read, ${elapsedSeconds}s.${outcome}\n\n${proofCostLine(metered)}\n\n${panelStatus(results)}\n\n<!-- eval-data:v1: ${Buffer.from(JSON.stringify(payload), "utf8").toString("base64")} :end -->`;
   if (!post) return body;
   try {
     // GH_REPO makes gh api's placeholders follow the same --repo selection as the PR read.
@@ -521,15 +525,21 @@ export function postLocalProof(artifact, round, elapsedMs, results, repo, spawn 
   return body;
 }
 
-export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runProbe, policyOptions = {}, modelOptions = {} } = {}) {
+export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runProbe, policyOptions = {}, modelOptions = {}, artifactOptions = {} } = {}) {
+  if (flag("demo")) {
+    const { runDemo } = await import("./demo.mjs");
+    console.log(runDemo());
+    process.exitCode = 0;
+    return;
+  }
   if (process.argv.some((value) => value === "--round" || value.startsWith("--round="))) {
-    console.error("Tribunal refused: --round is removed; runnerRound is assigned by the runner.");
+    console.error("Juryloop refused: --round is removed; runnerRound is assigned by the runner.");
     process.exitCode = 4;
     return;
   }
   const override = arg("override");
   if (flag("override") && (typeof override !== "string" || !override.trim() || override.startsWith("--"))) {
-    console.error("Tribunal refused: --override requires a nonempty reason.");
+    console.error("Juryloop refused: --override requires a nonempty reason.");
     process.exitCode = 4;
     return;
   }
@@ -544,7 +554,7 @@ export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runP
   // and names the re-probe command, for operators who want the probe to be a deliberate step.
   const gate = await admitPanel(policy, { probeOptions, probe: flag("no-auto-probe") ? null : probe });
   if (!gate.ok) {
-    console.error(`Tribunal refused to run: ${gate.why}`);
+    console.error(`Juryloop refused to run: ${gate.why}`);
     process.exitCode = 5;
     return;
   }
@@ -554,7 +564,7 @@ export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runP
   const disabled = all
     .filter((l) => !l.enabled)
     .map((l) => `${l.leg}: ${l.disabledReason ? l.disabledReason.split(".")[0] + "." : "disabled in the model registry"}`);
-  const artifact = buildArtifact();
+  const artifact = buildArtifact(artifactOptions);
   if (!artifact.contentHash) throw new Error("could not pin the artifact contentHash; retry after the PR head is stable");
   // Hold admission through banking so concurrent invocations cannot reuse a round or
   // race the ten-row limit. A stopped process may leave this visible lock for diagnosis.
@@ -564,7 +574,7 @@ export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runP
   try { lock = openSync(lockPath, "wx"); }
   catch (error) {
     if (error.code !== "EEXIST") throw error;
-    console.error(`Tribunal refused: another attempt holds this artifact lock (${lockPath}); wait for it to finish, or remove a stale lock after confirming its process has stopped.`);
+    console.error(`Juryloop refused: another attempt holds this artifact lock (${lockPath}); wait for it to finish, or remove a stale lock after confirming its process has stopped.`);
     process.exitCode = 6;
     return;
   }
@@ -574,12 +584,12 @@ export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runP
     const latest = history.at(-1);
     if (!override && latest?.decision?.reason === "QUIET" && latest?.decision?.action === "STOP"
       && latest.contentHash === artifact.contentHash) {
-      console.error("Tribunal refused: already quiet on unchanged content; change the artifact or pass --override with a reason.");
+      console.error("Juryloop refused: already quiet on unchanged content; change the artifact or pass --override with a reason.");
       process.exitCode = 2;
       return;
     }
     if (!override && history.length >= 10) {
-      console.error("Tribunal refused: this artifact already has 10 or more recorded rows; pass --override with a reason.");
+      console.error("Juryloop refused: this artifact already has 10 or more recorded rows; pass --override with a reason.");
       process.exitCode = 3;
       return;
     }
@@ -616,7 +626,8 @@ export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runP
     console.error([status, ...warnings].join("\n"));
 
     const perLeg = results.filter((r) => r.kind === "answered").map((r) => ({ leg: r.leg, findings: r.findings }));
-    const clusters = clusterFindings(perLeg);
+    const findingStats = {};
+    const reviewedClusters = clusterFindings(perLeg, { registry: all, goal: artifact.goal, stats: findingStats });
     // Feed the previous round's actionable findings from this artifact's ledger into the loop
     // decision so the REDO path can detect a fix that remains incomplete.
     // Whether each is STILL PRESENT is a judgment the operator makes and hands back with
@@ -624,25 +635,28 @@ export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runP
     // suppress a real one.
     const previousActionable = previousRoundActionable(artifact, round, policy.ledgerHome);
     const stillPresentCount = Number(arg("still-present", 0)) || 0;
-    const { remaining, summary, decision } = panelRound(results, clusters, {
-      round,
-      previousActionable,
-      stillPresent: previousActionable.slice(0, Math.min(stillPresentCount, previousActionable.length)),
-    });
-
     // Only a seat that answered this round may judge, so an unusable seat never costs a timeout.
     const answeredSeats = all.filter((leg) => results.some((r) => r.leg === leg.leg && r.kind === "answered"));
-    const judge = await runJudge({ clusters, artifactMessage, registry: answeredSeats, reviewLeg,
+    const judge = await runJudge({ clusters: reviewedClusters, artifactMessage, registry: answeredSeats, reviewLeg,
+      artifact, judgeWholeFiles: policy.judgeWholeFiles, exec: artifactOptions.exec,
       answered: results.filter((r) => r.kind === "answered" && !r.parseFailed).length,
       enabled: policy.judge !== false && !flag("no-judge") });
     if (judge.model) judge.effortShown = claudeEffortShown(judge.model, pickJudgeLeg(answeredSeats)?.effort);
     if (judge.ran) console.error(`[judge] ${judge.model} (effort ${judge.effortShown}): ${judge.kept} keep, ${judge.demoted} demote, ${judge.unjudged} not judged of ${judge.total} single-model finding(s)`);
+    const { clusters, remaining, summary, decision } = panelRound(results, reviewedClusters, {
+      round, judge, securityRaise: policy.securityRaise,
+      previousActionable,
+      stillPresent: previousActionable.slice(0, Math.min(stillPresentCount, previousActionable.length)),
+    });
     const previousRow = history.filter((row) => (row.runnerRound ?? row.round) === round - 1).at(-1);
     const stopPatching = stopPatchingSignals(previousRow, summary.actionable, round);
 
     const record = {
       ts: new Date().toISOString(),
       artifact: { kind: artifact.kind, source: artifact.source, title: artifact.title, chars: artifact.text.length, prNumber: artifact.prNumber ?? null, headSha: artifact.headSha ?? null },
+      ...(artifact.goal ? { goal: goalContext(artifact.goal) } : {}),
+      ...(artifact.goalRefusal ? { goalRefusal: artifact.goalRefusal } : {}),
+      droppedMissingWork: findingStats.droppedMissingWork,
       round,
       runnerRound: round,
       contentHash: artifact.contentHash,
@@ -662,9 +676,11 @@ export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runP
       actionable: summary.actionableCount,
       // Banked so the next round can re-verify them. Without this the REDO path has nothing to
       // compare against and the loop can never notice a fix that did not land.
-      actionableFindings: summary.actionable.map((f) => ({ title: f.title, file: f.file, severity: f.severity, category: f.category, foundBy: f.foundBy })),
+      actionableFindings: summary.actionable.map((f) => ({ title: f.title, file: f.file, severity: f.severity, category: f.category, foundBy: f.foundBy,
+        ...(f.kind ? { kind: f.kind } : {}), ...(f.kind === "missing-work" ? { goalItem: f.goalItem } : {}) })),
       soleFinds: soleFindsByLeg(clusters),
       judge: { ran: judge.ran, model: judge.model ?? null, reason: judge.reason ?? null,
+        ...(judge.wholeFiles ? { wholeFiles: judge.wholeFiles } : {}),
         ...(judge.ran ? { total: judge.total, kept: judge.kept, demoted: judge.demoted, unjudged: judge.unjudged,
           verdicts: judge.verdicts.map(({ id, title, by, verdict, why }) => ({ id, title, by, verdict, why })) } : {}) },
       // Banked apart from `legs` so no gate that counts legs ever counts an advisory seat.
@@ -702,7 +718,7 @@ export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runP
     const signal = recurrence.map((finding) => `RECURRING FINDING (channel signal)\n${finding.title}\nRounds: ${finding.rounds.join(", ")}`).join("\n\n");
     const stopSignal = renderStopPatching(stopPatching);
     const out = [status, ...warnings, ...(signal ? ["", signal] : []), ...(stopSignal ? ["", stopSignal] : []), "", render({ artifact, clusters, summary, decision,
-      legs: remaining, round, elapsedMs, disabled, metered: countedMetered, judge, stopPatching }), ...(advisory.length ? [renderAdvisory(advisory)] : []), ...(preview ? ["", preview] : [])].join("\n");
+      legs: remaining, round, elapsedMs, disabled, metered: countedMetered, judge, stopPatching, ...findingStats }), ...(advisory.length ? [renderAdvisory(advisory)] : []), ...(preview ? ["", preview] : [])].join("\n");
     const text = flag("json") ? JSON.stringify({ record, clusters, summary, decision, judge, recurrence, recurrenceSignal: signal || null,
       stopPatching, stopPatchingSignal: stopSignal || null,
       ...(preview ? { proof: preview } : {}) }, null, 2) : out;
@@ -730,5 +746,5 @@ export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runP
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  main().catch((e) => { console.error("tribunal run failed:", e.message); process.exitCode = 1; });
+  main().catch((e) => { console.error("Juryloop run failed:", e.message); process.exitCode = 1; });
 }

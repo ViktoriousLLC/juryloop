@@ -53,7 +53,9 @@ export function buildScorecard(rows, marks = []) {
       let problem = problems.find((entry) => sameIssue(entry, finding));
       if (!problem) {
         problem = { id: `P${problems.length + 1}`, title: finding.title, severity: finding.severity,
-          file: finding.file, rounds: [], foundBy: [], findings: [], judgeVerdicts: [] };
+          file: finding.file, rounds: [], foundBy: [], findings: [], judgeVerdicts: [],
+          ...(finding.kind ? { kind: finding.kind } : {}),
+          ...(finding.kind === "missing-work" ? { goalItem: finding.goalItem } : {}) };
         problems.push(problem);
       }
       const judgeId = Object.hasOwn(finding, "judgeId") ? finding.judgeId : finding.id;

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Tribunal's merge gate and goal-write reminder. The panel runs through
-// /tribunal-review:review; its multi-model work outlasts a hook's seconds-long timeout.
+// Juryloop's merge gate and goal-write reminder. The panel runs through
+// /juryloop:review; its multi-model work outlasts a hook's seconds-long timeout.
 //
 // PreToolUse(Bash|PowerShell) gates `gh pr merge` (and REST `pulls/<n>/merge`) by default. A PR
 // with no recorded local panel row blocks with exit 2 and a review command on stderr. A merge
@@ -429,12 +429,12 @@ function gateMerge(pr, payload, repoRoot, ledgerHome, unverified = null) {
   let why;
   if (pr === null) {
     why = "[merge-gate] BLOCKED, UNVERIFIED: this merge names no PR number (the current branch, a branch name or a variable), so the gate cannot check it against the ledger.\n" +
-      "Retype it with the number (gh pr merge <number>); if that PR has no panel yet, run /tribunal-review:review <number> first.\n";
+      "Retype it with the number (gh pr merge <number>); if that PR has no panel yet, run /juryloop:review <number> first.\n";
   } else {
     why = (unverified
       ? `[merge-gate] BLOCKED, UNVERIFIED: ${unverified}, so PR #${pr} could not be checked.\n`
       : `[merge-gate] BLOCKED: PR #${pr} has no recorded local panel.\n`) +
-      `Run /tribunal-review:review ${pr}, then retry the merge.\n`;
+      `Run /juryloop:review ${pr}, then retry the merge.\n`;
   }
   return { block: why +
     `Block ${state[key]} of ${MAX_BLOCKS} for ${pr === null ? "unnumbered merges" : "this PR"} this session; after ${MAX_BLOCKS} the merge gate stands down loudly. ` +
@@ -477,14 +477,14 @@ async function main() {
         // round found none), or a reason added later.
         const reason = latest.decision.reason;
         if (latest.actionable > 0 || reason !== "QUIET") {
-          notices.push(`Tribunal: PR #${pr}: the latest review round${latest.round != null ? ` (round ${latest.round})` : ""} ` +
+          notices.push(`Juryloop: PR #${pr}: the latest review round${latest.round != null ? ` (round ${latest.round})` : ""} ` +
             (latest.actionable > 0
               ? `still had ${latest.actionable} actionable finding(s) (${latest.decision.action}/${reason}). `
               : `ended ${latest.decision.action}/${reason}, not QUIET. `) +
             "The merge proceeds; read the round before merging.");
         }
         if (latest.newer) {
-          notices.push(`Tribunal: PR #${pr}: a NEWER round${latest.newer.round != null ? ` (round ${latest.newer.round})` : ""} ` +
+          notices.push(`Juryloop: PR #${pr}: a NEWER round${latest.newer.round != null ? ` (round ${latest.newer.round})` : ""} ` +
             `was incomplete (${latest.newer.decision.action}/${latest.newer.decision.reason}) and found ${latest.newer.actionable} actionable finding(s). ` +
             "The merge proceeds on the older complete round; read the newer findings before merging.");
         }
@@ -495,9 +495,9 @@ async function main() {
         if (result.block) blocks.push(result.block);
         else notices.push(result.notice);
       } else {
-        notices.push(`Tribunal: PR #${pr} has no recorded local panel.\n` +
+        notices.push(`Juryloop: PR #${pr} has no recorded local panel.\n` +
           `  node "${runner}" --pr ${pr}\n` +
-          `  (reminder only, not a block — run /tribunal-review:review ${pr} to review)`);
+          `  (reminder only, not a block — run /juryloop:review ${pr} to review)`);
       }
     }
     // Reminder-only mode stays silent on an unnumbered merge: with no brake there, a notice it
@@ -525,7 +525,7 @@ async function main() {
       catch (e) { if (e instanceof HookDeadline) unverified = ` (UNVERIFIED: ${e.message})`; else throw e; }
     }
     emitNotice("PostToolUse",
-      `Tribunal: this goal statement has no recorded panel for this content${unverified}.\n` +
+      `Juryloop: this goal statement has no recorded panel for this content${unverified}.\n` +
       `  node "${runner}" --file "${path}"\n` +
       `  (review goal statements before execution; reminder only)`,
     );

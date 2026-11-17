@@ -1,0 +1,36 @@
+diff --git a/src/catalogPage.mjs b/src/catalogPage.mjs
+new file mode 100644
+--- /dev/null
++++ b/src/catalogPage.mjs
+@@ -0,0 +1,31 @@
++export function catalogPage(items, page = 0, pageSize = 20) {
++  if (!Array.isArray(items)) {
++    throw new TypeError("items must be an array");
++  }
++  if (!Number.isInteger(page) || page < 0) {
++    throw new RangeError("page must be a nonnegative integer");
++  }
++  if (!Number.isFinite(pageSize) || pageSize < 1) {
++    throw new RangeError("pageSize must be at least one");
++  }
++
++  const total = items.length;
++  const pageCount = Math.ceil(total / pageSize);
++  const start = page * pageSize;
++  const end = Math.min(start + pageSize - 1, total);
++  const entries = items.slice(start, end);
++
++  return {
++    entries,
++    page,
++    pageSize,
++    total,
++    pageCount,
++    hasPrevious: page > 0,
++    hasNext: page + 1 < pageCount,
++  };
++}
++
++export function firstCatalogPage(items) {
++  return catalogPage(items, 0);
++}

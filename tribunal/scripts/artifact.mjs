@@ -3,12 +3,12 @@
 // An artifact can be a PR diff, a file, or pasted text. Each source is converted to the
 // same input shape so all three receive the same review protections.
 //
-// Everything below is pure except `fromPr`, which shells out to `gh`.
+// PRs read GitHub metadata and local git objects; files read the named local path.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { basename } from "node:path";
+import { basename, dirname, isAbsolute, relative, posix } from "node:path";
 
 export const MAX_CHARS_DEFAULT = 500_000;
 export const GH_MISSING_MESSAGE = "`gh` is not on PATH; --pr and proof posting need the GitHub CLI; --file and --stdin do not";
@@ -106,8 +106,8 @@ export function neutralizeTag(text, tag) {
  */
 export function buildUserMessage(artifact, { maxChars = MAX_CHARS_DEFAULT } = {}) {
   const kind = artifact.kind || "artifact";
-  // Two blocks exist in the assembled message, so no embedded text may emit EITHER closing tag.
-  const shield = (text) => neutralizeTag(neutralizeTag(text, kind), `${kind}_title`);
+  const tags = [kind, `${kind}_title`, ...(artifact.goal ? ["goal", "goal_context"] : [])];
+  const shield = (text) => tags.reduce((out, tag) => neutralizeTag(out, tag), text);
   const safe = shield(stripAuthorshipSignals(redactSensitive(artifact.text)));
   const truncated = safe.length > maxChars;
   const body = truncated ? safe.slice(0, maxChars) : safe;
@@ -121,7 +121,120 @@ export function buildUserMessage(artifact, { maxChars = MAX_CHARS_DEFAULT } = {}
     `<${kind}>`,
     body,
     `</${kind}>`,
+    ...(artifact.goal ? [
+      artifact.goal.item == null
+        ? "Check the diff against the goal. All missing-work findings are suggestions and never block. Check unrequested scope against the whole goal."
+        : `Check missing work for item ${artifact.goal.item} ONLY; do not report missing work for any other item. Check unrequested scope against the whole goal.`,
+      `<goal_context>${shield(redactSensitive(JSON.stringify(goalContext(artifact.goal))))}</goal_context>`,
+      "<goal>", shield(stripAuthorshipSignals(redactSensitive(artifact.goal.text))), "</goal>",
+    ] : []),
   ].filter(Boolean).join("\n");
+}
+
+export function goalContext({ text, ...context }) { return context; }
+
+const MAX_GOAL_BYTES = 50 * 1024;
+export const safeGitPath = (path) => typeof path === "string" && path.length > 0
+  && !/^[\\/]|^[a-z]:/i.test(path) && !/[\0\r\n]/.test(path)
+  && !path.replaceAll("\\", "/").split("/").includes("..");
+
+function readPrGoal(meta, exec) {
+  // Goal context is optional. Keep failures separate from the artifact so reviewers
+  // still receive the diff, while the report and ledger can explain the omission.
+  try { return resolvePrGoal(meta, exec); }
+  catch (error) {
+    return { refused: true, reason: error instanceof GoalRefusal ? error.message : "goal could not be resolved from the local git trees" };
+  }
+}
+
+class GoalRefusal extends Error {}
+
+export function gitEntryAt(git, tree, name) {
+  const row = git(["ls-tree", "-z", "--full-tree", tree, "--", name]).split("\0")
+    .find((row) => row.slice(row.indexOf("\t") + 1) === name);
+  if (!row) return null;
+  const [mode, type, oid] = row.slice(0, row.indexOf("\t")).split(" ");
+  return { mode, type, oid };
+}
+
+function prMergeBase(head, base, git) {
+  if (![head, base].every((oid) => typeof oid === "string" && /^[a-f0-9]{40,64}$/i.test(oid))) throw new GoalRefusal("PR head and base commit IDs are required");
+  try {
+    git(["cat-file", "-e", `${head}^{commit}`]);
+    git(["cat-file", "-e", `${base}^{commit}`]);
+    const mergeBase = git(["merge-base", base, head]).trim();
+    if (!/^[a-f0-9]{40,64}$/i.test(mergeBase)) throw new Error("no merge base");
+    return mergeBase;
+  } catch { throw new GoalRefusal("PR head or merge base is unavailable locally; fetch the PR head and base branch (and deepen shallow history), then retry"); }
+}
+
+function relativeToRepository(root, absolutePath) {
+  const path = relative(root, absolutePath);
+  if (safeGitPath(path || ".")) return path;
+  // Git expands repository aliases (including Windows 8.3 names). Locate the
+  // same root in the configured path, preserving the suffix as a Git tree path.
+  // Do not realpath the whole goalsDir: it need not exist in the working tree.
+  const canonicalRoot = realpathSync.native(root);
+  for (let ancestor = absolutePath; ; ancestor = dirname(ancestor)) {
+    try {
+      if (relative(canonicalRoot, realpathSync.native(ancestor)) === "") return relative(ancestor, absolutePath);
+    } catch { /* An absent working-tree ancestor does not affect the committed goal. */ }
+    if (dirname(ancestor) === ancestor) return path;
+  }
+}
+
+function goalsDirAt(mergeBase, git) {
+  const refuse = (why) => { throw new GoalRefusal(why); };
+  let goalsDir = "docs/reference/goals";
+  const configEntry = gitEntryAt(git, mergeBase, "tribunal.config.json");
+  if (configEntry) {
+    if (!["100644", "100755"].includes(configEntry.mode) || configEntry.type !== "blob") refuse("merge-base tribunal.config.json must be a regular file in the selected tree");
+    let config;
+    try { config = JSON.parse(git(["cat-file", "blob", configEntry.oid])); }
+    catch { refuse("merge-base tribunal.config.json could not be read as JSON"); }
+    if (!config || typeof config !== "object" || Array.isArray(config)) refuse("merge-base tribunal.config.json must be an object");
+    if (Object.hasOwn(config, "goalsDir")) goalsDir = config.goalsDir;
+  }
+  if (typeof goalsDir !== "string" || !goalsDir.trim()) refuse("merge-base goalsDir must be a nonempty path");
+  if (isAbsolute(goalsDir)) goalsDir = relativeToRepository(git(["rev-parse", "--show-toplevel"]).trim(), goalsDir);
+  goalsDir = posix.normalize(goalsDir.replaceAll("\\", "/") || ".").replace(/\/$/, "");
+  if (!safeGitPath(goalsDir)) refuse("path is outside the merge-base goalsDir");
+  return goalsDir;
+}
+
+export function readPrGoalsDir(head, base, git) {
+  return goalsDirAt(prMergeBase(head, base, git), git);
+}
+
+function resolvePrGoal(meta, exec) {
+  const lines = String(meta.body || "").split(/\r?\n/).filter((line) => /^Goal:\s*\S/.test(line));
+  if (!lines.length) return null;
+  const match = /^Goal:\s*(\S+)(?:\s+(.*))?$/.exec(lines[0].trimEnd());
+  const suppliedPath = match[1].replaceAll("\\", "/");
+  const refuse = (why) => { throw new GoalRefusal(why); };
+  const selection = match[2] == null ? null : /^item\s+([1-9]\d*)(?:\s+.*)?$/i.exec(match[2]);
+  if (match[2] != null && !selection) refuse("goal paths with spaces are not supported; text after the path must be item N followed by optional notes");
+  const item = selection == null ? null : Number(selection[1]);
+  if (!safeGitPath(suppliedPath)) refuse("path must be repository-relative with no .. segments or drive letter");
+  const path = posix.normalize(suppliedPath);
+  if (item != null && !Number.isSafeInteger(item)) refuse("item must be a positive safe integer");
+  const git = (args) => exec("git", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const head = meta.headRefOid, base = meta.baseRefOid;
+  const mergeBase = prMergeBase(head, base, git);
+  const entryAt = (tree, name) => gitEntryAt(git, tree, name);
+  const regular = (entry, name) => {
+    if (!entry || !["100644", "100755"].includes(entry.mode) || entry.type !== "blob") refuse(`${name} must be a regular file in the selected tree`);
+  };
+  const baseEntry = entryAt(mergeBase, path);
+  const entry = baseEntry || entryAt(head, path);
+  if (!entry) refuse(`${path} was not found in the merge base or PR head`);
+  regular(entry, path);
+  const size = Number(git(["cat-file", "-s", entry.oid]).trim());
+  if (!Number.isSafeInteger(size) || size < 0 || size > MAX_GOAL_BYTES) refuse("goal exceeds 50 KB or has an invalid blob size");
+  const goalsDir = goalsDirAt(mergeBase, git);
+  if (goalsDir !== "." && !path.startsWith(`${goalsDir}/`)) refuse("path is outside the merge-base goalsDir");
+  return { path, item, goalsDir, source: baseEntry ? "merge base" : "PR head", commit: baseEntry ? mergeBase : head,
+    ignored: lines.slice(1), text: git(["cat-file", "blob", entry.oid]) };
 }
 
 /** A local file, hashed from the same bytes supplied for review. */
@@ -142,7 +255,7 @@ export function fromText(text, title = "pasted text") {
   };
 }
 
-/** A pull request, via `gh`. Kept last because it is the only impure one. */
+/** A pull request, via `gh`, with its optional goal pinned to git objects. */
 export function fromPr(prNumber, { repo, exec = execFileSync } = {}) {
   const gh = (args, maxBuffer) => {
     try { return exec("gh", args, { encoding: "utf8", maxBuffer }); }
@@ -151,7 +264,7 @@ export function fromPr(prNumber, { repo, exec = execFileSync } = {}) {
       throw error;
     }
   };
-  const args = ["pr", "view", String(prNumber), "--json", "title,body,headRefOid"];
+  const args = ["pr", "view", String(prNumber), "--json", "title,body,headRefOid,baseRefName,baseRefOid"];
   if (repo) args.push("--repo", repo);
   const meta = JSON.parse(gh(args, 64 * 1024 * 1024));
   const diffArgs = ["pr", "diff", String(prNumber)];
@@ -183,6 +296,7 @@ export function fromPr(prNumber, { repo, exec = execFileSync } = {}) {
     if (!after || after.headRefOid !== headSha) headSha = null;
   }
 
+  const goal = readPrGoal(meta, exec);
   return {
     kind: "diff",
     source: `PR #${prNumber}`,
@@ -190,7 +304,10 @@ export function fromPr(prNumber, { repo, exec = execFileSync } = {}) {
     text: `${meta.body || ""}\n\n${diff}`,
     prNumber,
     headSha,
+    baseSha: meta.baseRefOid ?? null,
+    diff,
     // Only a head verified on both sides of the diff identifies the reviewed content.
     contentHash: headSha,
+    ...(goal?.refused ? { goalRefusal: { reason: goal.reason } } : goal ? { goal } : {}),
   };
 }

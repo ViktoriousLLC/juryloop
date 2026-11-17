@@ -218,7 +218,8 @@ const CLAUDE_REFUSED_TOOLS = [
 
 /** The contract every leg answers in. Kept small: a schema a model can satisfy in one pass. */
 export const FINDING_CONTRACT = `Reply with ONLY a JSON object, no prose around it, in this exact shape:
-{"findings":[{"title":"one line","severity":"BLOCKER|SUGGESTION|NIT","category":"correctness|security|money|data-loss|pii|perf|style","file":"path or null","line":0,"why":"what breaks, concretely","check":"how to verify this is real"}]}
+{"findings":[{"title":"one line","kind":"defect|missing-work|unrequested-scope","goalItem":null,"severity":"BLOCKER|SUGGESTION|NIT","category":"correctness|security|money|data-loss|pii|perf|style","file":"path or null","line":0,"why":"what breaks, concretely","check":"how to verify this is real"}]}
+Use defect for ordinary findings. With a supplied goal, missing-work means a goal item has no matching change (including an unfinished part); unrequested-scope means a change no goal item asked for. For missing-work, name the item in the title and set goalItem to its integer number. If an item is selected, report missing work ONLY for that item. Without a selected item, every missing-work finding is SUGGESTION, never a blocker. Unrequested-scope uses normal severity. Without a supplied goal, use only defect.
 Rules: a finding is a hypothesis, so every one names how to check it. Do not restate the artifact. Do not praise it. Do not propose new features. If you find no BLOCKER, say so by simply not emitting one. At most 8 findings.`;
 
 /**

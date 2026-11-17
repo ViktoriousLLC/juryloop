@@ -1,10 +1,10 @@
 ---
-description: "Review a PR, goal statement, plan, report, or pasted text with the cross-model Tribunal panel. Usage: /tribunal-review:review <path | PR number | nothing, to review what we just discussed>"
+description: "Review a PR, goal statement, plan, report, or pasted text with the cross-model Juryloop panel. Usage: /juryloop:review <path | PR number | nothing, to review what we just discussed>"
 ---
 
-# /tribunal-review:review — review with the panel on this machine
+# /juryloop:review — review with the panel on this machine
 
-**This file is the ONLY home for the Tribunal's judgment.** When it runs, what counts as
+**This file is the ONLY home for Juryloop's judgment.** When it runs, what counts as
 worth another round, and when the loop stops all live here. Other project instructions
 should point here instead of maintaining a second copy. Duplicating a rule across shipping
 instructions and CI documentation makes them contradict each other about whether a
@@ -14,7 +14,9 @@ The machinery is `${CLAUDE_PLUGIN_ROOT}/scripts/`. This file never restates its 
 
 ## Run it
 
-For `/tribunal-review:review doctor`, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs"` from the reviewed repository to report seat and machine readiness.
+For `/juryloop:review doctor`, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs"` from the reviewed repository to report seat and machine readiness.
+Add `--init` to `doctor.mjs` to create a starting repository config from detected CLI logins; an existing config is left untouched.
+For `/juryloop:review demo`, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/run.mjs" --demo` and show its output: a recorded sample round with no model calls, login, or saved files.
 
 Run from the repository being reviewed, preserving that working directory:
 
@@ -27,7 +29,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/run.mjs" --stdin --title "<name>" # pasted t
 PR rounds print proof text by default; add `--post-proof` to create or update the plugin's marked PR comment.
 The default `hooks/goal-wall.js` Stop hook gates changed goals at their current content; the
 PreToolUse merge gate requires a recorded panel row for an explicit PR number. Follow their
-`/tribunal-review:review` instructions to run the panel. Consumer config can disable either
+`/juryloop:review` instructions to run the panel. Consumer config can disable either
 gate with `gates.goalWall: false` or `gates.mergeGate: false`; see the README.
 
 Add `--json` for the machine shape. The runner assigns `runnerRound` across all recorded

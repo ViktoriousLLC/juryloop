@@ -11,7 +11,7 @@
 //     --pair <ci.json> <local.json>    # repeatable: CI versus local on the same pull request
 //
 // Each JSON file is either this tool's own --json output, or the base64 `eval-data:v1` blob out
-// of a CI Tribunal comment, decoded. Both shapes are normalised below.
+// of a CI Juryloop comment, decoded. Both shapes are normalised below.
 //
 // Exit: 0 only on EQUIVALENT. UNMEASURABLE and DIVERGENT both exit 1, because "we could not
 // measure it" must never read to a caller as "it passed".
@@ -63,7 +63,7 @@ function main() {
   const crossDetail = crossPairs.map(([ci, local]) => siteAgreement(ci, local));
   const verdict = equivalenceVerdict({ floor: nf.floor, crossScores: crossDetail.map((d) => d.score) });
 
-  console.log("\nTribunal equivalence gate\n");
+  console.log("\nJuryloop equivalence gate\n");
   console.log(`Noise floor (CI against itself): ${nf.floor == null ? "NOT MEASURED" : nf.floor.toFixed(2)} — ${nf.why}`);
   if (nf.scores) nf.scores.forEach((s, i) => console.log(`  self-pair ${i + 1}: ${s.toFixed(2)}`));
   console.log('\nCI versus local (agreement over defect SITES: same file, same category):');

@@ -43,6 +43,14 @@ test("a full, readable panel posts a marker naming every leg", () => {
   assert.equal(blob.panel_run_id, undefined, "a local run must never claim an Actions run id");
 });
 
+test("goal ledger hashes never replace the reviewed head in proof", () => {
+  const { calls, spawn } = capture();
+  postLocalProof({ ...artifact, contentHash: "b".repeat(64), goal: { path: "docs/reference/goals/work.md", item: 2 } },
+    3, 12345, FOUR_READ, undefined, spawn);
+  assert.equal(calls.length, 2);
+  assert.equal(blobOf(JSON.parse(calls[1].input).body).head_sha, HEAD);
+});
+
 test("an ANSWERED but UNREADABLE leg blocks the proof entirely", () => {
   // A reply that cannot be parsed contributes no findings. Counting only `answered` would
   // certify three readable legs and one unreadable leg as a full panel.

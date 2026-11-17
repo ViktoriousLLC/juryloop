@@ -4,7 +4,7 @@ The plugin owns review machinery; consuming repositories own policy. Keep that b
 when changing the runner, prompts, model registry, or hooks. See
 [`MAINTENANCE.md`](MAINTENANCE.md) for release and pricing responsibilities.
 
-The manual review command is `/tribunal-review:review`, defined in
+The manual review command is `/juryloop:review`, defined in
 [`review.md`](tribunal/commands/review.md). Goal and merge gates are enabled by default;
 keep their opt-outs, bounded blocking, and visible bypass notices covered by fixtures.
 
@@ -19,6 +19,9 @@ node --test
 node --test goal-wall.negative-control.cjs
 node ../scripts/noTelemetry.negative-control.mjs
 ```
+
+Also run the migration placeholder fixtures from the repository root:
+`node --test tribunal-review-moved/hooks/moved.test.cjs`.
 
 CI runs these commands on Ubuntu and Windows. Fixtures stub model calls and GitHub
 operations; tests must not invoke a real model service, post comments, or modify Git

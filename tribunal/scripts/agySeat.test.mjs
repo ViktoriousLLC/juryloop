@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolvePolicy } from "./policy.mjs";
@@ -55,14 +55,13 @@ const run = (leg, script, sourceEnv = { PATH: "/bin", USERPROFILE: "C:/Users/u",
     sourceEnv, platform: "win32" }).then((r) => ({ r, calls: fake.calls }));
 };
 
-test("an agy-cli row is valid only as a keyless google plan seat", () => {
+test("an agy-cli row is valid only as a keyless plan seat", () => {
   assert.deepEqual(validateLegs([agyLeg]), []);
   const cases = [
     [{ billing: "metered" }, /billing must be "plan"/],
     [{ envKeys: ["GEMINI_API_KEY"] }, /envKeys must be empty/],
     [{ envKeys: ["AGY_BIN"] }, /envKeys must be empty/],
     [{ requiredEnv: ["GEMINI_API_KEY"] }, /requires no environment variable/],
-    [{ vendor: "anthropic" }, /vendor must be "google"/],
     [{ effort: "ultra" }, /no "ultra" effort/],
   ];
   for (const [change, pattern] of cases) {
@@ -265,7 +264,7 @@ test("no result event with exit 0 is an empty reply, not an answer", async () =>
 });
 
 test("resolveExe finds agy at the installer path when PATH predates the install", () => {
-  const winInstalled = join("C:\\Users\\u\\AppData\\Local", "agy", "bin", "agy.exe");
+  const winInstalled = win32.join("C:\\Users\\u\\AppData\\Local", "agy", "bin", "agy.exe");
   const win = resolveExe("agy", { env: { Path: "C:\\nowhere", USERPROFILE: "C:\\Users\\u", LOCALAPPDATA: "C:\\Users\\u\\AppData\\Local" },
     platform: "win32", isFile: (p) => p === winInstalled });
   assert.equal(win.found, true);

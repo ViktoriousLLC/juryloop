@@ -1,0 +1,5 @@
+{
+  "name": "tribunal-review",
+  "version": "0.16.0",
+  "description": "Tribunal Review was renamed to Juryloop. This placeholder does no reviews; it only points users to Juryloop and holds merges until they switch."
+}

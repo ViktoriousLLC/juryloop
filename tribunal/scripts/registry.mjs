@@ -59,6 +59,7 @@ export function validateLegs(legs) {
     else if (seenIds.has(l.id)) problems.push(`${at} runs "${l.id}", which another leg already runs; a panel of N names must be N models or it is not cross-model`);
     else seenIds.add(l.id);
     if (!RUNNERS.has(l.runner)) problems.push(`${at} has runner "${l.runner}", expected one of ${[...RUNNERS].join(", ")}`);
+    if (l.vendor !== undefined && (typeof l.vendor !== "string" || !l.vendor.trim())) problems.push(`${at} vendor must be a nonempty string`);
     if (l.family !== undefined && (l.runner !== "codex-cli" || typeof l.family !== "string" || !/^[a-z0-9-]+$/.test(l.family))) {
       problems.push(`${at} family must be a string of [a-z0-9-]+ on a codex-cli leg`);
     }
@@ -87,7 +88,6 @@ export function validateLegs(legs) {
       if (l.requiredEnv !== undefined && !(Array.isArray(l.requiredEnv) && l.requiredEnv.length === 0)) {
         problems.push(`${at} is an agy-cli seat; it requires no environment variable`);
       }
-      if (l.vendor !== "google") problems.push(`${at} is an agy-cli seat; its vendor must be "google"`);
       if (l.effort === "ultra") problems.push(`${at} is an agy-cli seat; agy has no "ultra" effort`);
     }
 

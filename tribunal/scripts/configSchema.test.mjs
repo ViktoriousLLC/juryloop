@@ -78,7 +78,7 @@ function validate(value, schema) {
 test("config example validates and covers every documented policy field", () => {
   const schema = readJson("tribunal.config.schema.json");
   const example = readJson("tribunal.config.example.json");
-  const fields = ["preset", "gates", "judge", ...pathFields, ...legFields].sort();
+  const fields = ["preset", "gates", "judge", "securityRaise", "judgeWholeFiles", ...pathFields, ...legFields].sort();
   assert.deepEqual(Object.keys(schema.properties).sort(), fields);
   assert.deepEqual(Object.keys(example).sort(), fields);
   validate(example, schema);
@@ -166,6 +166,42 @@ test("judge defaults on, accepts boolean opt-outs, and rejects non-booleans in s
     assert.throws(() => validate({ judge }, schema), /must be a boolean/);
     writeFileSync(join(repo, "tribunal.config.json"), JSON.stringify({ judge }));
     assert.throws(() => resolvePolicy(repo, options), { message: "judge must be a boolean" });
+  }
+});
+
+test("judgeWholeFiles defaults off and accepts only booleans in schema and policy", (t) => {
+  const repo = gateRepository(t);
+  const schema = readJson("tribunal.config.schema.json");
+  const options = { resolveExecutable: () => ({ found: false }) };
+  assert.equal(schema.properties.judgeWholeFiles.default, false);
+  assert.equal(resolvePolicy(repo, options).judgeWholeFiles, false);
+  for (const config of [{}, { judgeWholeFiles: true }, { judgeWholeFiles: false }]) {
+    validate(config, schema);
+    writeFileSync(join(repo, "tribunal.config.json"), JSON.stringify(config));
+    assert.equal(resolvePolicy(repo, options).judgeWholeFiles, config.judgeWholeFiles ?? false);
+  }
+  for (const judgeWholeFiles of [null, "false", 0, 1, [], {}]) {
+    assert.throws(() => validate({ judgeWholeFiles }, schema), /must be a boolean/);
+    writeFileSync(join(repo, "tribunal.config.json"), JSON.stringify({ judgeWholeFiles }));
+    assert.throws(() => resolvePolicy(repo, options), { message: "judgeWholeFiles must be a boolean" });
+  }
+});
+
+test("securityRaise defaults on and accepts only booleans in schema and policy", (t) => {
+  const repo = gateRepository(t);
+  const schema = readJson("tribunal.config.schema.json");
+  const options = { resolveExecutable: () => ({ found: false }) };
+  assert.equal(schema.properties.securityRaise.default, true);
+  assert.equal(resolvePolicy(repo, options).securityRaise, true);
+  for (const config of [{}, { securityRaise: true }, { securityRaise: false }]) {
+    validate(config, schema);
+    writeFileSync(join(repo, "tribunal.config.json"), JSON.stringify(config));
+    assert.equal(resolvePolicy(repo, options).securityRaise, config.securityRaise ?? true);
+  }
+  for (const securityRaise of [null, "false", 0, 1, [], {}]) {
+    assert.throws(() => validate({ securityRaise }, schema), /must be a boolean/);
+    writeFileSync(join(repo, "tribunal.config.json"), JSON.stringify({ securityRaise }));
+    assert.throws(() => resolvePolicy(repo, options), { message: "securityRaise must be a boolean" });
   }
 });
 

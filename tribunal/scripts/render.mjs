@@ -12,6 +12,19 @@
 const ICON = { BLOCKER: "⛔", SUGGESTION: "•", NIT: "·" };
 
 import { loneFindings } from "./judge.mjs";
+import { vendorAgreement } from "./panelLogic.mjs";
+import { redactSensitive } from "./artifact.mjs";
+
+function makerLabel(c) {
+  const label = c.vendorLabel === undefined ? vendorAgreement(c.foundBy).vendorLabel : c.vendorLabel;
+  return label ? ` · ${label}` : "";
+}
+
+function raisedLabel(c) {
+  return c.raised ? ` · raised: security, ${c.raised.reason === "cross-vendor" ? `${c.raised.makers} makers` : "judge kept"}` : "";
+}
+const kindLabel = (c) => c.kind === "missing-work" ? ` [missing work${c.goalItem != null ? `: item ${c.goalItem}` : ""}]`
+  : c.kind === "unrequested-scope" ? " [unrequested scope]" : "";
 
 export function verdictLine(clusters, actionableCount) {
   const n = (s) => clusters.filter((c) => c.severity === s).length;
@@ -25,18 +38,26 @@ function findingBlock(c) {
   const where = c.file ? ` — \`${c.file}${c.line ? `:${c.line}` : ""}\`` : "";
   const who = c.foundBy.length > 1 ? `${c.foundBy.length} legs: ${c.foundBy.join(", ")}` : `only ${c.foundBy[0]}`;
   return [
-    `${ICON[c.severity] || "·"} **${c.title}**${where}  _(${who})_`,
+    `${ICON[c.severity] || "·"} **${c.title}**${kindLabel(c)}${where}  _(${who})_${makerLabel(c)}${raisedLabel(c)}`,
     c.why ? `  ${c.why}` : "",
     c.check ? `  _Check:_ ${c.check}` : "",
   ].filter(Boolean).join("\n");
 }
 
-export function render({ artifact, clusters, summary, decision, legs, round, elapsedMs, disabled = [], metered = null, judge = null, stopPatching = [] }) {
+export function render({ artifact, clusters, summary, decision, legs, round, elapsedMs, disabled = [], metered = null, judge = null, stopPatching = [], droppedMissingWork = 0 }) {
   const out = [];
-  out.push(`## 🧑‍⚖️ Tribunal — ${artifact.title || artifact.source || "artifact"} (round ${round})`);
+  out.push(`## 🧑‍⚖️ Juryloop — ${artifact.title || artifact.source || "artifact"} (round ${round})`);
   out.push("");
   out.push(verdictLine(clusters, summary.actionableCount));
   out.push("");
+  if (artifact.goalRefusal) out.push(`Goal line ignored: ${redactSensitive(artifact.goalRefusal.reason)}`, "");
+  if (droppedMissingWork) out.push(`Dropped ${droppedMissingWork} missing-work finding(s) naming an item other than selected item ${artifact.goal.item}.`, "");
+  if (artifact.goal) {
+    const g = artifact.goal;
+    out.push(`Goal: ${redactSensitive(g.path)}${g.item != null ? ` item ${g.item}` : ""} — ${g.source} (${g.commit}).${g.source === "PR head" ? " New goal written by the PR author." : ""}`);
+    for (const line of g.ignored) out.push(`Ignored Goal line: ${redactSensitive(line)}`);
+    out.push("");
+  }
 
   // ABOVE THE FOLD, always, when it happened. A lost leg changes how much the rest is worth,
   // and this is the line that stops a thin panel reading as a clean one.
@@ -57,7 +78,7 @@ export function render({ artifact, clusters, summary, decision, legs, round, ela
     out.push("");
   }
 
-  const bySev = (s) => clusters.filter((c) => c.severity === s);
+  const bySev = (s) => clusters.filter((c) => c.severity === s).sort((a, b) => Number(Boolean(b.crossVendor)) - Number(Boolean(a.crossVendor)));
   for (const [heading, list] of [["Blockers", bySev("BLOCKER")], ["Suggestions", bySev("SUGGESTION")]]) {
     if (!list.length) continue; // a section with no content is omitted, never rendered empty
     out.push(`### ${heading}`);
@@ -72,13 +93,13 @@ export function render({ artifact, clusters, summary, decision, legs, round, ela
       const verdict = judge?.ran ? judge.verdicts.find((entry) => entry.id === id) : null;
       const tag = verdict?.verdict === "keep" ? ` · judge: keep${verdict.why ? `: ${verdict.why}` : ""}`
         : verdict?.verdict === "demote" ? ` · judge: likely false positive: ${verdict.why}` : "";
-      out.push(`- ${ICON[c.severity]} **${c.title}** _(${c.foundBy[0]})_${tag}`);
+      out.push(`- ${ICON[c.severity]} **${c.title}**${kindLabel(c)} _(${c.foundBy[0]})_${tag}${makerLabel(c)}${raisedLabel(c)}`);
     }
     out.push("");
   }
 
   if (judge?.ran) {
-    out.push(`_Blinded judge (${judge.model}${judge.effortShown ? `, effort ${judge.effortShown}` : ""}, trial): ${judge.kept} keep · ${judge.demoted} likely false · ${judge.unjudged} not judged. Annotation only; it changes no count, verdict or gate._`, "");
+    out.push(`_Blinded judge (${judge.model}${judge.effortShown ? `, effort ${judge.effortShown}` : ""}, trial): ${judge.kept} keep · ${judge.demoted} likely false · ${judge.unjudged} not judged. Kept security findings may be raised; demotions do not lower severity._`, "");
   } else if (judge && judge.reason && !["turned off", "no single-model findings", "fewer than two reviewers answered"].includes(judge.reason)) {
     out.push(`_Blinded judge did not run: ${judge.reason}._`, "");
   }
@@ -86,7 +107,7 @@ export function render({ artifact, clusters, summary, decision, legs, round, ela
   const nits = bySev("NIT");
   if (nits.length) {
     out.push(`<details><summary>${nits.length} nits</summary>`, "");
-    for (const c of nits) out.push(`- ${c.title}${c.file ? ` — \`${c.file}\`` : ""}`);
+    for (const c of nits) out.push(`- ${c.title}${kindLabel(c)}${c.file ? ` — \`${c.file}\`` : ""}${makerLabel(c)}`);
     out.push("", "</details>", "");
   }
 

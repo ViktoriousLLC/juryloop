@@ -12,6 +12,8 @@
 // 3. VERIFY THE LAST FIX BEFORE A NEW ROUND. Findings still present after an attempted fix
 //    require finishing that fix before requesting another review.
 
+import { loneFindings } from "./judge.mjs";
+
 /** Categories where a defect can hurt someone. Everything else is advice. */
 export const ACTIONABLE_CATEGORIES = new Set(["correctness", "security", "money", "data-loss", "pii"]);
 
@@ -25,6 +27,7 @@ export const CEILING = 10;
  * and a hallucination can take.
  */
 export function isActionable(finding) {
+  if (finding?.kind === "missing-work" && (finding.goalItem == null || finding.goalItemInferred)) return false;
   if (!finding || !ACTIONABLE_CATEGORIES.has(finding.category)) return false;
   const sev = String(finding.severity || "").toUpperCase();
   if (sev === "BLOCKER") return true;
@@ -158,7 +161,30 @@ export function similarity(a, b) {
 
 const SEVERITY_RANK = { BLOCKER: 3, SUGGESTION: 2, NIT: 1 };
 
+function findingOrder(a, b) {
+  return (SEVERITY_RANK[b.severity] || 0) - (SEVERITY_RANK[a.severity] || 0)
+    || Number(b.crossVendor) - Number(a.crossVendor) || b.foundBy.length - a.foundBy.length;
+}
+
+export function raiseSecurityFindings(clusters, { judge = null, enabled = true } = {}) {
+  const judgeIds = new Map(loneFindings(clusters).map(({ id, cluster }) => [cluster, id]));
+  return clusters.map((cluster) => {
+    const judgeId = judgeIds.get(cluster) ?? null;
+    const finding = { ...cluster, judgeId };
+    if (cluster.kind === "missing-work" && (cluster.goalItem == null || cluster.goalItemInferred)) return finding;
+    const severity = { NIT: "SUGGESTION", SUGGESTION: "BLOCKER" }[cluster.severity];
+    if (!enabled || cluster.category !== "security" || !severity || cluster.raised) return finding;
+    const kept = judge?.ran && judge.verdicts.some((entry) => entry.id === judgeId && entry.verdict === "keep");
+    if (!cluster.crossVendor && !kept) return finding;
+    return { ...finding, severity, raised: { from: cluster.severity, to: severity,
+      reason: cluster.crossVendor ? "cross-vendor" : "judge-kept",
+      ...(cluster.crossVendor ? { makers: cluster.vendors.length } : {}) } };
+  }).sort(findingOrder);
+}
+
 export function sameIssue(a, b, threshold = 0.5) {
+  if ((a.kind || "defect") !== (b.kind || "defect")) return false;
+  if (a.kind === "missing-work" && (a.goalItem ?? null) !== (b.goalItem ?? null)) return false;
   const fa = (a.file || "").trim(), fb = (b.file || "").trim();
   // Different named files are different issues, full stop. Two legs naming DIFFERENT files
   // have not corroborated each other, however similar the wording.
@@ -166,20 +192,55 @@ export function sameIssue(a, b, threshold = 0.5) {
   return similarity(a.title, b.title) >= threshold;
 }
 
-export function clusterFindings(perLeg, { threshold = 0.5 } = {}) {
+export function vendorAgreement(foundBy, registry = []) {
+  const makers = new Map();
+  let unknown = false;
+  for (const leg of foundBy) {
+    const vendor = registry.find((row) => row.leg === leg)?.vendor?.trim();
+    if (vendor) makers.set(vendor.toLowerCase(), vendor);
+    else unknown = true;
+  }
+  const vendors = [...makers.values()].sort();
+  const crossVendor = vendors.length >= 2;
+  const names = [...vendors, ...(unknown ? ["unknown maker"] : [])];
+  const vendorLabel = crossVendor ? null : names.length > 1 ? names.join(" and ")
+    : vendors.length ? `${vendors[0]} only` : "unknown maker";
+  return { vendors, crossVendor, vendorLabel };
+}
+
+export function clusterFindings(perLeg, { threshold = 0.5, registry = [], goal = null, stats = {} } = {}) {
   const clusters = [];
+  stats.droppedMissingWork = 0;
   for (const { leg, findings } of perLeg) {
-    for (const f of findings || []) {
+    for (let f of findings || []) {
       if (!f || !f.title) continue;
+      const kind = String(f.kind || "defect").trim().toLowerCase().replace(/[_\s]+/g, "-");
+      f = { ...f, kind: ["defect", "missing-work", "unrequested-scope"].includes(kind) ? kind : "defect" };
+      if (f.kind === "missing-work") {
+        const itemMatch = typeof f.goalItem === "string" ? /^(?:item\s+|#)?([+-]?\d+)$/i.exec(f.goalItem.trim()) : null;
+        const item = itemMatch ? Number(itemMatch[1]) : f.goalItem;
+        const knownItem = Number.isSafeInteger(item);
+        // Reviewers were asked about the selected item only. An absent or malformed
+        // item inherits that selection as advice; only an explicit different integer is dropped.
+        if (goal?.item != null && knownItem && item !== goal.item) {
+          stats.droppedMissingWork += 1;
+          continue;
+        }
+        f = { ...f, goalItem: goal?.item ?? null, goalItemInferred: !knownItem,
+          severity: goal?.item == null || (!knownItem && String(f.severity).toUpperCase() === "BLOCKER") ? "SUGGESTION" : f.severity };
+      }
       const hit = clusters.find((c) => sameIssue(c, f, threshold) && !c.foundBy.includes(leg));
       if (hit) {
         hit.foundBy.push(leg);
+        // Explicit item evidence can still block when another leg omitted its item.
+        if (f.kind === "missing-work" && !f.goalItemInferred) delete hit.goalItemInferred;
         // Keep the WORST severity any leg assigned. A finding one model calls a blocker is a
         // blocker; letting a milder duplicate downgrade it would quietly disarm the loop.
         if ((SEVERITY_RANK[String(f.severity).toUpperCase()] || 0) > (SEVERITY_RANK[hit.severity] || 0)) {
           hit.severity = String(f.severity).toUpperCase();
         }
         if (!hit.file && f.file) hit.file = f.file;
+        if (String(f.category).toLowerCase() === "security") hit.category = "security";
         hit.alsoSaid.push({ leg, title: f.title, why: f.why });
       } else {
         clusters.push({
@@ -192,11 +253,15 @@ export function clusterFindings(perLeg, { threshold = 0.5 } = {}) {
           check: f.check || "",
           foundBy: [leg],
           alsoSaid: [],
+          ...(f.kind && f.kind !== "defect" ? { kind: f.kind } : {}),
+          ...(f.kind === "missing-work" ? { goalItem: f.goalItem } : {}),
+          ...(f.kind === "missing-work" && f.goalItemInferred ? { goalItemInferred: true } : {}),
         });
       }
     }
   }
-  return clusters.sort((a, b) => (SEVERITY_RANK[b.severity] || 0) - (SEVERITY_RANK[a.severity] || 0) || b.foundBy.length - a.foundBy.length);
+  for (const cluster of clusters) Object.assign(cluster, vendorAgreement(cluster.foundBy, registry));
+  return clusters.sort(findingOrder);
 }
 
 /** Which legs found something nobody else did — the reason to run a panel rather than one model. */

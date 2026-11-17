@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Bash|PowerShell",
+      "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/moved.cjs\" PreToolUse", "timeout": 10 }]
+    }],
+    "SessionStart": [{
+      "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/moved.cjs\" SessionStart", "timeout": 10 }]
+    }],
+    "Stop": [{
+      "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/moved.cjs\" Stop", "timeout": 10 }]
+    }]
+  }
+}

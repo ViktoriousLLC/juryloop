@@ -1,10 +1,10 @@
-# Tribunal Review reference
+# Juryloop reference
 
 Everything the front page leaves out: per-repository configuration, adding models, the automatic review gates, the convergence rules, exit codes, and how to run the checks. Start with the [README](../README.md).
 
 ## Install on an older Claude Code
 
-The one-line install needs Claude Code v2.1.275 or later. Older versions take two commands: `/plugin marketplace add ViktoriousLLC/tribunal-review`, then `/plugin install tribunal-review@viktorious`.
+The one-line install needs Claude Code v2.1.275 or later. Older versions take two commands: `/plugin marketplace add ViktoriousLLC/juryloop`, then `/plugin install juryloop@viktorious`.
 
 ## Two defaults worth knowing
 
@@ -23,7 +23,7 @@ node "<installed-plugin-root>/scripts/isolationProbe.mjs"  measure the reviewer 
 
 Claude seats use CLI aliases (`opus`, `fable`), which the Claude CLI resolves to its newest
 model. Codex seats keep a pinned `id` and may declare `family` (for example, `sol` or
-`astra`). Tribunal selects the highest numeric version in that family from
+`astra`). Juryloop selects the highest numeric version in that family from
 `$CODEX_HOME/models_cache.json` (default `~/.codex`), excluding hidden models. If the
 installed Codex CLI is older than the list's `client_version`, it keeps the pin and prints
 an upgrade notice when a different model is available. Missing or unreadable cache/version
@@ -127,7 +127,7 @@ differ from `origin/main` in this checkout, so a goal written, merged and pulled
 reply, or written in a sibling worktree, is not checked at Stop. The merge gate still asks for a
 review of that PR's diff, which contains the goal text, but that is a code review, not a review
 of the goal statement.
-Hooks direct the assistant to `/tribunal-review:review`; they never run a model themselves.
+Hooks direct the assistant to `/juryloop:review`; they never run a model themselves.
 The merge gate checks recorded PR identity; it does not fetch or compare the PR's current head.
 Each gate blocks at most three times per session for a given goal's bytes or PR number,
 then stands down loudly. Brake state lives under `ledgerHome`; unavailable state also
@@ -225,7 +225,7 @@ Ambient routing settings cannot silently choose another key recipient.
 
 At the end of a reply, the goal wall blocks goals under `goalsDir` that differ from `origin/main`
 until a complete panel row covers their exact bytes. At merge, the merge gate blocks
-`gh pr merge <PR number>` until that PR has a recorded panel row. Both name `/tribunal-review:review`.
+`gh pr merge <PR number>` until that PR has a recorded panel row. Both name `/juryloop:review`.
 
 Both gates default to on. To turn either off, set its field to `false` in `tribunal.config.json`:
 ```json
@@ -241,6 +241,20 @@ every goal before execution, and any artifact on demand. Documentation-only chan
 An actionable finding is a blocker in correctness, security, money, data loss, or PII, or a
 suggestion in those categories independently found by at least two legs. Verify findings
 against the code before fixing them, then verify the fix landed before spending another round.
+
+Within each severity section, findings reported by at least two distinct named model makers
+come first, without a maker label. Other findings name their makers, such as `Anthropic only`
+or `Anthropic and unknown maker`. A registry row's optional `vendor` is the model's maker,
+including for OpenAI-compatible endpoints; an omitted vendor is `unknown maker` and does not
+count toward cross-vendor agreement. This ordering does not change the stop rule.
+
+Security findings are raised one level (`NIT` to `SUGGESTION`, `SUGGESTION` to `BLOCKER`)
+before the stop decision when two named makers report them, or when the blinded judge keeps
+them. Blockers stay blockers. The report marks each raise and the ledger's `findingList`
+records its original severity, resulting severity and reason in `raised`. Set
+`"securityRaise": false` in `tribunal.config.json` to disable raises. A lone kept security
+suggestion can therefore turn QUIET into CONTINUE; a suggestion from two seats already
+continues under the existing stop rule, even with raises disabled. The ten-round ceiling stays.
 
 - The runner requires a recorded `OVERALL: PASS` isolation probe.
 - When the most recent row for an artifact is QUIET on unchanged content, the runner refuses
@@ -289,15 +303,17 @@ the relevant behavior to detect drift, unexecuted features, and unreachable cont
 
 ### Blinded judge (trial)
 
-After each local panel round with single-model findings, the judge makes one extra Claude CLI
+After reviewers answer and before the stop decision, the judge makes one extra Claude CLI
 call. It prefers the enabled, non-advisory `opus` seat, otherwise the first enabled,
 non-advisory Claude CLI seat. It reads the same artifact message as the reviewers and only
 the non-nit findings raised by exactly one reviewer, with reviewer identities removed, then annotates
 each with keep or likely false positive and a reason.
 
-This is annotation only: it changes no findings, actionable count, decision, proof, exit code,
-or gate. It fails open on an unavailable leg, failed or unparseable reply, or any other judge
-error. The ledger's `judge` field records whether it ran, its model or skip reason, and, when
+With security raises enabled, a kept security suggestion becomes a blocker before the stop
+decision. Other verdicts annotate findings without changing their severity: a demotion never
+lowers a finding, and an unjudged finding gets no judge-based raise. An unavailable leg,
+failed or unparseable reply, or other judge error supplies no keep verdict. The ledger's
+`judge` field records whether it ran, its model or skip reason, and, when
 it ran, counts and, per finding, its id, title, the seat that raised it, the verdict and the
 reason. Only a seat that answered this round can judge, the judge is skipped when fewer than
 two reviewers answered (every finding would be "lone" and self-judged), and its call has a
@@ -306,6 +322,34 @@ one of the reviewers: it is blinded, not independent, so the ledger keeps the ra
 let the trial measure whether it favours its own findings. Its call is one plan-covered Claude
 CLI call and is not in the metered cost line. It is on by default; set `"judge": false` in
 `tribunal.config.json` or pass `--no-judge` to turn it off.
+
+`judgeWholeFiles` is a boolean, **false by default**. Setting `"judgeWholeFiles": true`
+sends the **full text of cited files at the reviewed head commit to the judge seat**,
+including unchanged lines the author did not put up for review. This uses the judge seat
+selected above and applies only to PR reviews with a verified head and diff. Reviewers'
+messages, `--file`, and `--stdin` are unchanged. Company-routed seats remain deferred to
+the company-mode design and implementation.
+
+Only files cited by the single-reviewer, non-nit findings the judge checks are eligible.
+Their paths must exactly match a path in the PR diff's `+++` headers after normalizing
+`./` and removing an `a/` or `b/` side prefix. There is no case folding or suffix matching.
+Paths with `..` segments, a leading slash, a drive letter, double quotes, backslashes,
+control characters, or non-ASCII characters are refused before any git call.
+Files whose path git quotes (non-ASCII or special characters) are never sent.
+Files are read only from head-commit git objects, never the working tree; only regular
+blobs with mode `100644` or `100755` qualify.
+Files under `goalsDir` as resolved from the merge base by PR goal checking are excluded,
+even without a `Goal:` line. If that directory cannot be resolved, no whole files are read.
+
+The limits are **100 KB (102,400 bytes) per file** and **300 KB (307,200 bytes) per round**,
+inclusive. Blob sizes are checked before their contents are read. Each file is sent once,
+in order of its highest-severity citing finding, then the finding's order in the merged
+list. A file that exceeds either limit is skipped; later files that fit can still be sent.
+Skipped files are judged on the diff alone. Full files use the artifact's secret redaction,
+authorship stripping and boundary-tag neutralization, in a separate delimited block per
+file. The ledger's `judge.wholeFiles` records each path, byte size (`null` when not read),
+and `reason` (`sent` or the skip reason), never the file text. Sizes count original blob
+bytes before redaction; decoded text must also fit the limits.
 
 ## PR scorecard
 
@@ -487,3 +531,24 @@ The plugin is licensed under [Apache 2.0](../LICENSE). Read [SECURITY.md](../SEC
 the isolation boundary and no-telemetry promise, [CONTRIBUTING.md](../CONTRIBUTING.md) for
 fixture and negative-control requirements, and [CHANGELOG.md](../CHANGELOG.md) for releases.
 Technical design and portability notes are kept in the maintainer's private archive.
+
+## Internal names that keep the old name
+
+These keep their historical name (Tribunal) on purpose, so existing settings, history and trust
+bindings keep working after the rename to Juryloop:
+
+- the user-home folder `~/.tribunal/` (ledger rows and `trust.json`);
+- the repository config file `tribunal.config.json`;
+- every `TRIBUNAL_*` environment variable name;
+- the `tribunal/` plugin folder in this repository;
+- the machine markers: the `tribunal-proof` PR comment marker and the `eval-data:v1` comment;
+- ledger field names;
+- the break-glass file `.claude/tribunal-wall-breakglass` (create it under this name; a file
+  under a new name bypasses nothing);
+- the hook file `hooks/tribunal-reminder.js` and the schema file `tribunal.config.schema.json`.
+
+Upgrading a repository that turns the plugin on in its own `.claude/settings.json`: change the
+`enabledPlugins` key `tribunal-review@viktorious` to `juryloop@viktorious`.
+The old `tribunal-review` marketplace entry installs a placeholder that holds merges (even when Juryloop is also enabled), prints migration instructions at session start, and never reads or writes `~/.tribunal` state.
+Install `juryloop@viktorious`, uninstall `tribunal-review@viktorious`, and restart Claude Code
+to restore reviews and the goal wall; the placeholder itself performs no reviews and does not block Stop.
