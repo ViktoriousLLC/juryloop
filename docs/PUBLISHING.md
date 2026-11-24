@@ -46,7 +46,7 @@ npm publish                   # publishConfig.access is public
 A marketplace entry that points at the npm package instead of the git tree:
 
 ```json
-{ "name": "juryloop", "source": { "source": "npm", "package": "juryloop", "version": "^0.16.0" } }
+{ "name": "juryloop", "source": { "source": "npm", "package": "juryloop", "version": "^0.16.1" } }
 ```
 
 Use the package name `juryloop`. The unrelated package `tribunal` is a separate project.

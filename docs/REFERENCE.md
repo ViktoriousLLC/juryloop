@@ -241,6 +241,9 @@ every goal before execution, and any artifact on demand. Documentation-only chan
 An actionable finding is a blocker in correctness, security, money, data loss, or PII, or a
 suggestion in those categories independently found by at least two legs. Verify findings
 against the code before fixing them, then verify the fix landed before spending another round.
+The fixer builds no new capability a suggestion or nit asks for: it lists it as a follow-up in
+its own pull request comment (or its reply, outside a pull request), still fixes any real defect
+the finding shows and any work the goal asked for, and fixes or argues false every blocker.
 
 Within each severity section, findings reported by at least two distinct named model makers
 come first, without a maker label. Other findings name their makers, such as `Anthropic only`

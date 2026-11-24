@@ -82,6 +82,27 @@ real insight and a hallucination take, and this panel produces many of them.
 findings can be false positives, and a fix applied to a non-bug is damage. The panel prints
 a `Check:` line with each finding for exactly this.
 
+## Fixing findings: fix the problem, defer the new feature
+
+Fix what the findings say. When a SUGGESTION or NIT asks for a new capability (a feature, a
+mode, a new file whose job is not to fix the finding), do not build it in this pull request.
+Work the goal asked for is not a new capability: a missing-work finding is built, whatever its
+severity.
+
+- If the finding also shows a real defect, fix that defect in scope another way and defer only
+  the new capability.
+- List what you deferred as a follow-up in a pull request comment of your own, never in the
+  description or the plugin's proof comment. When the review is not of a pull request, list it
+  in your reply to the user instead.
+- A **BLOCKER is never deferred this way.** It claims a real defect, so fix it, or argue it
+  false in writing in that same comment.
+
+A lone suggestion or a nit never earns another round, so deferring one cannot hold the loop
+open. A suggestion that two or more legs found in one of the categories above does earn a
+round. If that is a feature request you deferred, or a seat repeats a blocker you argued false,
+the round continues, and the stop-patching choice or `--override "reason"` described below is
+how the loop ends.
+
 ## When the loop stops
 
 Fix, re-review, repeat. Then:

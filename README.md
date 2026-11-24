@@ -1,6 +1,6 @@
 # Juryloop
 
-The problem today is that when Claude makes a plan, it only knows what it knows, and it cannot judge it, look at it from an objective third-party perspective and analyze it. Codex and Gemini have completely different brains and can critically give feedback. Many tools that do this are metered, where you pay per review. A few others also run on a plan (the Claude or ChatGPT subscription you already pay for), but of the ones I found, none review the plan itself before the work starts, and none keep re-reading the fixed work until a round comes back clean.
+The problem today is that when Claude makes a plan, it only knows what it knows, and it cannot judge it, look at it from an objective third-party perspective and analyze it. Codex and Gemini have completely different brains and can critically give feedback. Many tools that do this are metered, where you pay per review. A few others also run on a plan (the Claude or ChatGPT subscription you already pay for), but of the ones I found, none run on their own: none review the plan automatically when it is written, and none stop the agent from merging until the work has been reviewed.
 
 I built Juryloop, a Claude Code plugin that has other AI models review Claude's work using your current plan, and you don't have to pay for metered usage.
 

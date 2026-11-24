@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.16.1 — 2026-11-19
+
+- The README no longer says none of the other tools keep re-reading fixed work: Theo's council
+  skill does. It now says what none of them do: run on their own, reviewing a plan when it is
+  written and stopping the agent from merging until the work has been reviewed.
+- `/juryloop:review` tells the agent fixing findings to keep new features out of the fix. A
+  suggestion or nit that asks for a new capability becomes a follow-up in the fixer's own pull
+  request comment; a real defect inside it is still fixed, work the goal asked for is still built,
+  and a blocker is fixed or argued false in writing.
+
 ## v0.16.0 — 2026-11-16
 
 - **Renamed to Juryloop.** Plugin `juryloop`, slash command `/juryloop:review`, GitHub repository
