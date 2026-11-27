@@ -314,7 +314,7 @@ test("without a Goal line, artifact has no goal and message and git access are u
   const f = fixture(t, { body: "Ordinary PR description" });
   const artifact = f.read();
   assert.deepEqual(artifact, { kind: "diff", source: "PR #7", title: f.meta.title, text: `${f.meta.body}\n\n${f.git(["diff", `${f.base}...${f.head}`])}`,
-    prNumber: 7, headSha: f.head, contentHash: f.head, baseSha: f.base, diff: f.git(["diff", `${f.base}...${f.head}`]) });
+    prNumber: 7, headSha: f.head, contentHash: f.head, baseSha: f.base, repository: null, diff: f.git(["diff", `${f.base}...${f.head}`]) });
   assert.equal(f.calls.filter((c) => c.cmd === "git").length, 0);
   assert.equal(buildUserMessage(artifact), `<diff_title>${f.meta.title}</diff_title>\n<diff>\n${artifact.text}\n</diff>`);
 });

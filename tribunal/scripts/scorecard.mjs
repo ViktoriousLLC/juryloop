@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sameIssue } from "./panelLogic.mjs";
-import { artifactHistory, artifactKey } from "./ledger.mjs";
+import { artifactHistory, artifactKey, readLedgerRows } from "./ledger.mjs";
 import { resolvePolicy } from "./policy.mjs";
 
 const SEVERITY_RANK = { BLOCKER: 3, SUGGESTION: 2, NIT: 1 };
@@ -143,6 +143,139 @@ export function renderScorecard(card) {
   return lines.join("\n");
 }
 
+// labels.ndjson: one {key, round, id: "F<n>", label: "real" | "not-real" |
+// "cannot-check" | "unsure" | "retry", worth: "yes" | "no" | "unknown",
+// votes: [vote with evidence, ...], models: [model id, ...], promptVersion: string} per line.
+// The last (key, round, id) wins; a cut-off JSON line, or a parsed line without a valid key, round,
+// id and label, is counted as unreadable and skipped.
+export function readLabels(ledgerHome) {
+  let text;
+  try { text = readFileSync(join(ledgerHome, "labels.ndjson"), "utf8"); }
+  catch (error) { if (error.code === "ENOENT") return { entries: [], unreadableLines: 0 }; throw error; }
+  const entries = [];
+  let unreadableLines = 0;
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try { entries.push(JSON.parse(line)); }
+    catch { unreadableLines += 1; }
+  }
+  return { entries, unreadableLines };
+}
+
+const FINAL_LABELS = new Set(["real", "not-real"]);
+const CHECKER_LABELS = new Set([...FINAL_LABELS, "unsure", "cannot-check", "retry"]);
+const entriesOf = (groups) => groups instanceof Map ? [...groups] : Object.entries(groups);
+const getGroup = (groups, key) => groups instanceof Map ? groups.get(key) : groups[key];
+const labelKey = (key, round, id) => JSON.stringify([key, round, id]);
+const accuracyGroup = () => ({ problems: 0,
+  checker: { labelled: 0, real: 0, realWorthYes: 0, realRate: null },
+  // Fixer marks do not record worth. Never infer it from a checker label or a fix.
+  fixerMarks: { labelled: 0, real: 0, realWorthYes: null, realRate: null } });
+
+function countAccuracy(group, problem, label) {
+  group.problems += 1;
+  for (const [stats, verdict] of [[group.checker, label?.label], [group.fixerMarks, problem.verdict]]) {
+    if (FINAL_LABELS.has(verdict)) stats.labelled += 1;
+    if (verdict === "real") stats.real += 1;
+    stats.realRate = stats.labelled ? stats.real / stats.labelled : null;
+  }
+  if (label?.label === "real" && label.worth === "yes") group.checker.realWorthYes += 1;
+}
+
+/** Pure aggregation; groups can be Maps or objects. Labels are an array or readLabels' result. */
+export function buildAccuracy(rowsByKey, marksByKey = {}, labels = []) {
+  const latest = new Map();
+  let invalidLabelLines = 0;
+  for (const [index, label] of (Array.isArray(labels) ? labels : labels.entries).entries()) {
+    if (typeof label?.key !== "string" || !Number.isSafeInteger(label.round)
+      || typeof label.id !== "string" || !CHECKER_LABELS.has(label.label)) { invalidLabelLines += 1; continue; }
+    latest.set(labelKey(label.key, label.round, label.id), { ...label, index });
+  }
+  const report = { rounds: 0, complete: 0, skipped: 0, legacyRounds: 0,
+    counts: { total: 0, labelled: 0, real: 0, notReal: 0, unsure: 0, cannotCheck: 0, retry: 0, unlabelled: 0 },
+    ...accuracyGroup(), bySeverity: {}, bySeat: {},
+    byJudge: Object.fromEntries(["kept", "demoted", "not judged"].map((name) => [name, accuracyGroup()])),
+    unreadableLabelLines: (Array.isArray(labels) ? 0 : labels.unreadableLines) + invalidLabelLines,
+    warnings: [] };
+  const severities = new Map(), seats = new Map(), times = new Map();
+  const ensure = (map, key) => {
+    if (!map.has(key)) map.set(key, accuracyGroup());
+    return map.get(key);
+  };
+  for (const [key, rows] of entriesOf(rowsByKey)) {
+    const card = buildScorecard(rows, getGroup(marksByKey, key) || []);
+    for (const field of ["rounds", "complete", "skipped", "legacyRounds"]) report[field] += card[field];
+    report.warnings.push(...card.warnings.map((warning) => `${key}: ${warning}`));
+    // Timing includes failed/incomplete rounds too; missing and null never become zero.
+    for (const row of rows) for (const leg of row.legs || []) {
+      ensure(seats, leg.leg);
+      if (!times.has(leg.leg)) times.set(leg.leg, []);
+      if (Number.isFinite(leg.elapsedMs) && leg.elapsedMs >= 0) times.get(leg.leg).push(leg.elapsedMs);
+    }
+    // A ledger home is one repository, and Juryloop keys every history by pr:<n> inside it. A
+    // --repo round of another repository's PR with the same number therefore merges with this
+    // one here exactly as it does in the runner's own history (a known limit, see REFERENCE).
+    // Say so rather than report it as one repository's numbers.
+    const repositories = new Set(rows.map((row) => row.artifact?.repository).filter(Boolean));
+    if (repositories.size > 1) report.warnings.push(`${key}: rounds from more than one repository (${[...repositories].join(", ")}) share this key, so their numbers are merged`);
+    for (const problem of card.activeProblems) {
+      const label = problem.findings.map(({ round, id }) => latest.get(labelKey(key, round, id)))
+        .filter(Boolean).sort((a, b) => b.round - a.round || b.index - a.index)[0];
+      const counts = report.counts;
+      counts.total += 1;
+      if (FINAL_LABELS.has(label?.label)) {
+        counts.labelled += 1;
+        counts[label.label === "real" ? "real" : "notReal"] += 1;
+      } else counts[label?.label === "cannot-check" ? "cannotCheck" : label?.label || "unlabelled"] += 1;
+      countAccuracy(report, problem, label);
+      countAccuracy(ensure(severities, problem.severity || "not recorded"), problem, label);
+      for (const seat of problem.foundBy) countAccuracy(ensure(seats, seat), problem, label);
+      const calls = new Set(problem.judgeVerdicts.map((entry) => entry.verdict)
+        .filter((verdict) => verdict === "keep" || verdict === "demote"));
+      // Match the scorecard: at most once per call type, even across repeated rounds.
+      for (const call of calls.size ? calls : [null]) {
+        countAccuracy(report.byJudge[call === "keep" ? "kept" : call === "demote" ? "demoted" : "not judged"], problem, label);
+      }
+    }
+  }
+  report.bySeverity = Object.fromEntries(severities);
+  report.bySeat = Object.fromEntries([...seats].map(([seat, group]) => {
+    const values = (times.get(seat) || []).sort((a, b) => a - b), middle = Math.floor(values.length / 2);
+    const medianElapsedMs = !values.length ? null : values.length % 2 ? values[middle]
+      : (values[middle - 1] + values[middle]) / 2;
+    return [seat, { ...group, medianElapsedMs }];
+  }));
+  return report;
+}
+
+export function renderAccuracy(report) {
+  const lines = [];
+  if (!report.rounds) lines.push("no review rounds recorded", "no labels yet");
+  else {
+    lines.push(`Accuracy: ${report.rounds} rounds, ${report.complete} complete; ${report.skipped} incomplete skipped`);
+    const c = report.counts;
+    lines.push(`Problems: ${c.total} total, ${c.labelled} labelled (${c.real} real / ${c.notReal} not-real), ${c.unsure} unsure, ${c.cannotCheck} cannot-check, ${c.retry} retry, ${c.unlabelled} unlabelled`);
+    if (c.total === c.unlabelled) lines.push("no checker labels yet");
+    if (report.legacyRounds) lines.push(`unique: not recorded for ${report.legacyRounds} round(s) without finding lists`);
+    const rate = (value) => value === null ? "not recorded" : `${(value * 100).toFixed(1)}%`;
+    const cells = (group) => [group.problems, group.checker.labelled, group.checker.real,
+      group.checker.realWorthYes, rate(group.checker.realRate), group.fixerMarks.labelled,
+      group.fixerMarks.real, "not recorded", rate(group.fixerMarks.realRate)].join(" | ");
+    const header = "problems | checker labelled | checker real | checker real & worth yes | checker real rate | fixer marks labelled | fixer marks real | fixer marks real & worth yes | fixer marks real rate";
+    for (const [name, groups] of [["severity", report.bySeverity], ["seat", report.bySeat], ["judge call", report.byJudge]]) {
+      lines.push("", `${name} | ${header}`);
+      for (const [value, group] of Object.entries(groups)) lines.push(`${value} | ${cells(group)}`);
+    }
+    lines.push("", "seat | median elapsedMs");
+    for (const [seat, group] of Object.entries(report.bySeat)) lines.push(`${seat} | ${group.medianElapsedMs ?? "not recorded"}`);
+    lines.push("Fixer marks do not record worth. Rates use only real / not-real; unsure is excluded.");
+    lines.push("A problem can count under multiple seats or judge call types, once per group.");
+  }
+  if (report.unreadableLabelLines) lines.push(`${report.unreadableLabelLines} unreadable label line(s) skipped`);
+  for (const warning of report.warnings) lines.push(`Warning: ${warning}`);
+  return lines.join("\n");
+}
+
 export function readMarks(ledgerHome, key) {
   let text;
   try { text = readFileSync(join(ledgerHome, "marks.ndjson"), "utf8"); }
@@ -152,7 +285,8 @@ export function readMarks(ledgerHome, key) {
     // breaking the scorecard or blocking the correction that would replace it.
     try {
       const mark = JSON.parse(line);
-      return mark?.key === key && typeof mark.id === "string" && typeof mark.verdict === "string"
+      return typeof mark?.key === "string" && (key === undefined || mark.key === key)
+        && typeof mark.id === "string" && typeof mark.verdict === "string"
         && /^(?:real|not-real|unsure|duplicate:P[1-9]\d*)$/.test(mark.verdict) ? [mark] : [];
     }
     catch { return []; } // A partial final append does not hide earlier marks.
@@ -209,6 +343,7 @@ export function main(argv = process.argv.slice(2)) {
     for (let i = 0; i < argv.length; i += 1) {
       const name = argv[i];
       if (name === "--json") { options.json = true; continue; }
+      if (name === "--accuracy") { options.accuracy = true; continue; }
       if (!["--pr", "--file", "--source", "--mark"].includes(name)) throw new Error(`unknown argument: ${name}`);
       const value = argv[++i];
       if (!value?.trim() || value.startsWith("--")) throw new Error(`${name} requires a value`);
@@ -217,6 +352,25 @@ export function main(argv = process.argv.slice(2)) {
         if (options[name]) throw new Error(`${name} may only be given once`);
         options[name] = value;
       }
+    }
+    if (options.accuracy) {
+      if (markTexts.length || ["--pr", "--file", "--source"].some((key) => options[key])) {
+        throw new Error("--accuracy reads the whole ledger; do not combine it with selectors or --mark");
+      }
+      const { ledgerHome } = resolvePolicy(process.cwd());
+      const groupByKey = (items, keyOf) => {
+        const groups = new Map();
+        for (const item of items) {
+          const key = keyOf(item);
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(item);
+        }
+        return groups;
+      };
+      const report = buildAccuracy(groupByKey(readLedgerRows(ledgerHome), (row) => artifactKey(row.artifact)),
+        groupByKey(readMarks(ledgerHome), (mark) => mark.key), readLabels(ledgerHome));
+      console.log(options.json ? JSON.stringify(report, null, 2) : renderAccuracy(report));
+      return;
     }
     if (["--pr", "--file", "--source"].filter((key) => options[key]).length !== 1) throw new Error("give exactly one of --pr <n>, --file <path>, or --source <kind:source>");
     let artifact;

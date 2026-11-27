@@ -32,7 +32,8 @@ const hash = (text) => createHash("sha256").update(text).digest("hex");
 
 function fixture(t, { modelsCache = { client_version: "0.163.0", models: loadRegistry()
   .filter((leg) => leg.runner === "codex-cli").map((leg) => ({ slug: leg.id, default_reasoning_level: "low" })) },
-  codexVersion = "0.163.0", actualClaudeModel = null, prBody = null, seatFindings = null, newInPrGoal = false } = {}) {
+  codexVersion = "0.163.0", actualClaudeModel = null, prBody = null, seatFindings = null, newInPrGoal = false,
+  prUrl = null, timed = false } = {}) {
   let prHead = "a".repeat(40);
   const root = mkdtempSync(join(tmpdir(), "tribunal-conversion-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -66,10 +67,12 @@ function fixture(t, { modelsCache = { client_version: "0.163.0", models: loadReg
   writeFileSync(join(ledger, "isolation-probe.md"), `OVERALL: PASS\n\n\`\`\`json\n${JSON.stringify(probeRecord, null, 2)}\n\`\`\`\n`);
   const wrapper = join(root, "invoke.mjs");
   writeFileSync(wrapper, `import { main } from ${JSON.stringify(pathToFileURL(RUNNER).href)};
+    let fixtureClock = 0;
+    if (${timed}) Date.now = () => fixtureClock;
     await main({ artifactOptions: { exec: (cmd, args) => {
       const head = process.env.TRIBUNAL_STUB_HEAD, base = "b".repeat(40), blob = "c".repeat(40);
       if (cmd === "gh") return args[1] === "view"
-        ? JSON.stringify({ title: "CSV export", body: ${JSON.stringify(prBody)}, headRefOid: head, baseRefOid: base })
+        ? JSON.stringify({ title: "CSV export", body: ${JSON.stringify(prBody)}, headRefOid: head, baseRefOid: base, url: ${JSON.stringify(prUrl)} })
         : "diff --git a/export.mjs b/export.mjs";
       if (args[0] === "merge-base") return base;
       if (args[0] === "ls-tree" && ${newInPrGoal} && args[3] === base) return "";
@@ -85,6 +88,10 @@ function fixture(t, { modelsCache = { client_version: "0.163.0", models: loadReg
     }, reviewLeg: async (leg, message, options) => {
       const model = leg.runner === "claude-cli" ? ${JSON.stringify(actualClaudeModel)} || leg.id : leg.id;
       if (options?.contract) return { kind: "answered", model, findings: [{ id: "F1", verdict: "demote", why: "Already handled in the artifact." }] };
+      if (${timed}) await new Promise((done) => setImmediate(() => { fixtureClock += 25; done(); }));
+      if (process.env.TRIBUNAL_STUB === "throw") throw new Error("fixture leg threw unchanged");
+      if (process.env.TRIBUNAL_STUB === "failed" && leg.leg === "sol") return {
+        leg: leg.leg, model, kind: "lost", answered: false, error: "fixture failure", findings: [] };
       const partial = process.env.TRIBUNAL_STUB === "partial";
       return { leg: leg.leg, model, kind: "answered", answered: true,
         parseFailed: partial, error: partial ? "unparseable test response" : null,
@@ -106,6 +113,70 @@ function fixture(t, { modelsCache = { client_version: "0.163.0", models: loadReg
   return { root, repo, ledger, file, config, invoke, rows, seed, probeOptions,
     setPrHead: (head) => { prHead = head; } };
 }
+
+test("accuracy evidence banks original finding text, redaction, individual times and PR identity", (t) => {
+  const secret = "sk" + "-abcdefghijklmnopqrstuv";
+  const why = "The ownership comparison is absent.\nAnother account can write this record.";
+  const f = fixture(t, { prUrl: "https://github.com/fixture/project/pull/7", timed: true,
+    seatFindings: [{ ...finding, why, check: `Check the request with ${secret}.` },
+      { ...otherFile, why: `The response includes ${secret}.`, check: "Inspect the logout response." },
+      { ...finding, file: "no-text.js", title: "Account lookup dereferences an absent user" }] });
+  const result = f.invoke(["--pr", "7", "--json", "--no-judge"]);
+  assert.equal(result.status, 1, result.stderr);
+  const row = f.rows().at(-1);
+  assert.equal(row.findingList.length, 3);
+  assert.deepEqual(row.findingList.map(({ id }) => id), ["F1", "F2", "F3"]);
+  assert.equal(row.findingList[0].why, why);
+  assert.equal(row.findingList[0].check, "Check the request with sk-REDACTED.");
+  assert.equal(row.findingList[1].why, "The response includes sk-REDACTED.");
+  assert.equal(row.findingList[1].check, "Inspect the logout response.");
+  assert.equal(row.findingList[2].why, "");
+  assert.equal(row.findingList[2].check, "");
+  assert.ok(!JSON.stringify(row).includes(secret));
+  assert.ok(row.legs.length >= 3);
+  assert.deepEqual(row.legs.map((leg) => leg.elapsedMs), row.legs.map((_, i) => (i + 1) * 25));
+  assert.equal(row.artifact.prNumber, "7");
+  assert.equal(row.artifact.headSha, "a".repeat(40));
+  assert.equal(row.artifact.baseSha, "b".repeat(40));
+  assert.equal(row.artifact.repository, "fixture/project");
+});
+
+test("accuracy timing includes returned failures and thrown errors still reject without banking", (t) => {
+  const f = fixture(t, { timed: true });
+  const failed = f.invoke(["--file", f.file, "--json", "--no-judge"], "failed");
+  assert.equal(failed.status, 1, failed.stderr);
+  const row = f.rows().at(-1);
+  assert.equal(row.legs.find((leg) => leg.leg === "sol").elapsedMs, 50);
+  assert.equal(row.legs.find((leg) => leg.leg === "sol").answered, false);
+  assert.equal(row.artifact.baseSha, null);
+  assert.equal(row.artifact.repository, null);
+  const thrown = f.invoke(["--file", f.file, "--no-judge"], "throw");
+  assert.equal(thrown.status, 1);
+  assert.match(thrown.stderr, /Error: fixture leg threw unchanged/);
+  assert.equal(f.rows().length, 1, "a thrown leg still aborts banking");
+  assert.ok(!readdirSync(f.ledger).some((name) => name.endsWith(".lock")));
+});
+
+test("accuracy timing is null for missing credentials and refused trust", (t) => {
+  const f = fixture(t, { timed: true });
+  const legs = loadRegistry().filter((leg) => ["opus", "sol", "astra"].includes(leg.leg));
+  legs.push({ leg: "absent", id: "fixture-absent", runner: "genai-sdk", enabled: true, billing: "metered",
+    envKeys: ["TRIBUNAL_ACCURACY_ABSENT"], requiredEnv: ["TRIBUNAL_ACCURACY_ABSENT"] },
+  { leg: "untrusted", id: "fixture-untrusted", runner: "openai-api", enabled: true, billing: "metered",
+    baseUrl: "https://accuracy-fixture.invalid/v1", envKeys: ["TRIBUNAL_ACCURACY_UNTRUSTED"],
+    requiredEnv: ["TRIBUNAL_ACCURACY_UNTRUSTED"] });
+  writeFileSync(join(f.repo, "models.json"), JSON.stringify({ legs }));
+  writeFileSync(join(f.repo, "tribunal.config.json"), JSON.stringify({ ...f.config, modelsFile: "models.json" }));
+  const result = f.invoke(["--file", f.file, "--json", "--no-judge"]);
+  assert.ok([0, 1].includes(result.status), result.stderr);
+  const row = f.rows().at(-1);
+  for (const name of ["absent", "untrusted"]) {
+    const leg = row.legs.find((entry) => entry.leg === name);
+    assert.equal(leg.kind, "not-run");
+    assert.equal(leg.elapsedMs, null);
+  }
+  assert.ok(row.legs.filter((leg) => leg.answered).every((leg) => typeof leg.elapsedMs === "number"));
+});
 
 test("an unusable PR goal still runs every reviewer and banks and renders its refusal", (t) => {
   const f = fixture(t, { prBody: "Goal: reduce latency", seatFindings: [{ ...finding, kind: "bug" }] });

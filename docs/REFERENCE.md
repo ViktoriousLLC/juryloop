@@ -405,6 +405,52 @@ literal in PowerShell and bash. A key containing a single quote or newline inste
 A key with no recorded rounds says so instead of printing an empty table.
 After marking, the command prints the refreshed scorecard; normal exit is 0.
 
+### Local accuracy report
+
+From the reviewed repository, run
+`node "<installed-plugin-root>/scripts/scorecard.mjs" --accuracy` (optionally `--json`).
+It reads the whole resolved ledger home locally, sends nothing, and writes nothing.
+Do not combine it with `--pr`, `--file`, `--source`, or `--mark`.
+
+New round rows bank each finding's `why` and `check` after secret redaction, without
+inventing missing text. Each counted leg banks its own `elapsedMs`, including returned
+failures; legs refused before dispatch bank `null`. A thrown error still aborts the round
+without banking it. PR artifacts also bank `baseSha` and `repository` (`owner/name`, from
+the PR URL) beside `prNumber` and `headSha`; file/stdin artifacts bank null for these fields.
+Older rows lack these fields: their values are **not recorded**, never reconstructed as
+empty text or zero time.
+
+The optional `<ledgerHome>/labels.ndjson` contains one JSON object per line:
+
+```json
+{"key":"pr:123","round":2,"id":"F3","label":"real","worth":"yes","votes":[{"label":"real","evidence":"The reviewed caller omits the ownership check."}],"models":["checker-model-id"],"promptVersion":"checker-v1"}
+```
+
+`key` is the runner's artifact key (`pr:<number>` or `<kind>:<source>`), `round` is the
+banked round number, and `id` is the banked finding ID, such as `F3` (not the scorecard's
+`P3`). `label` is `real`, `not-real`, `cannot-check`, `unsure`, or `retry`; `worth` is `yes`,
+`no`, or `unknown`. `votes` is an array of votes with evidence, `models` is an array of
+model IDs, and `promptVersion` is a string. The last line for the same `(key, round, id)`
+wins. Unparseable lines are skipped and reported as `N unreadable label line(s) skipped`.
+The report reads labels; it does not run a checker or backfill old findings.
+
+Problems use the existing scorecard matching, complete-round filtering, and duplicate-mark
+folding separately for each artifact key. Repeated findings count once. A problem uses its
+latest labelled round; ties within that round use the last appended label. Counts show
+total problems, labelled (`real` / `not-real`), unsure, cannot-check, retry, and unlabelled.
+Rows predating finding lists are reported as not recorded and cannot contribute problems.
+
+Tables break down problems by severity, raising seat, and Judge call (kept, demoted, not
+judged). Each table has separate **checker** and **fixer marks** counts and real rates;
+only `real` and `not-real` enter those rates. Checker columns also count `real` with worth
+`yes`. Fixer marks do not record worth, so their worth column says **not recorded**.
+A problem can appear once under each seat that raised it, and once under each Judge call
+type seen across its rounds. The seat timing table uses recorded times from all rounds,
+including failures, and prints **not recorded** when none exist. Missing times are excluded;
+an explicitly recorded zero is included. With rounds but no labels, fixer columns still
+appear beside `no checker labels yet`. An empty ledger says `no review rounds recorded`
+and `no labels yet`.
+
 Vendor rate limits get one retry after a 60-second base delay plus random jitter of less
 than 25% of that delay, for every runner. Set `TRIBUNAL_RATE_LIMIT_RETRY_MS` to override
 the base delay in milliseconds; empty or whitespace values use the default. The log shows
@@ -534,6 +580,14 @@ The plugin is licensed under [Apache 2.0](../LICENSE). Read [SECURITY.md](../SEC
 the isolation boundary and no-telemetry promise, [CONTRIBUTING.md](../CONTRIBUTING.md) for
 fixture and negative-control requirements, and [CHANGELOG.md](../CHANGELOG.md) for releases.
 Technical design and portability notes are kept in the maintainer's private archive.
+
+### Known limit: one ledger home is one repository
+
+Juryloop keys a pull request's history by `pr:<n>` inside its ledger home, which is one per
+repository. A round run with `--repo` for another repository's pull request of the same number is
+merged with this repository's history: in the round count, the ceiling, the scorecard and the
+`--accuracy` report alike. The accuracy report warns when one key holds rounds from more than one
+repository. Run another repository's reviews from that repository's own folder.
 
 ## Internal names that keep the old name
 

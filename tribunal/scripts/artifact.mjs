@@ -264,7 +264,7 @@ export function fromPr(prNumber, { repo, exec = execFileSync } = {}) {
       throw error;
     }
   };
-  const args = ["pr", "view", String(prNumber), "--json", "title,body,headRefOid,baseRefName,baseRefOid"];
+  const args = ["pr", "view", String(prNumber), "--json", "title,body,headRefOid,baseRefName,baseRefOid,url"];
   if (repo) args.push("--repo", repo);
   const meta = JSON.parse(gh(args, 64 * 1024 * 1024));
   const diffArgs = ["pr", "diff", String(prNumber)];
@@ -297,6 +297,12 @@ export function fromPr(prNumber, { repo, exec = execFileSync } = {}) {
   }
 
   const goal = readPrGoal(meta, exec);
+  let repository = null;
+  try {
+    const url = new URL(meta.url);
+    const match = /^\/([^/]+)\/([^/]+)\/pull\/[1-9]\d*\/?$/.exec(url.pathname);
+    if (["https:", "http:"].includes(url.protocol) && match) repository = `${match[1]}/${match[2]}`;
+  } catch { /* Older metadata and malformed URLs have no recorded repository. */ }
   return {
     kind: "diff",
     source: `PR #${prNumber}`,
@@ -305,6 +311,7 @@ export function fromPr(prNumber, { repo, exec = execFileSync } = {}) {
     prNumber,
     headSha,
     baseSha: meta.baseRefOid ?? null,
+    repository,
     diff,
     // Only a head verified on both sides of the diff identifies the reviewed content.
     contentHash: headSha,

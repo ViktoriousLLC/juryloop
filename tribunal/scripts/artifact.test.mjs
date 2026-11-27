@@ -285,10 +285,24 @@ test("fromPr records its number and head SHA from the same metadata call", (t) =
   assert.deepEqual(fromPr(359, { exec: makeExec({ title: "x", body: "y", headRefOid: "a".repeat(40) }) }), {
     kind: "diff", source: "PR #359", title: "x", text: "y\n\ndiff --git a/x b/x",
     prNumber: 359, headSha: "a".repeat(40), contentHash: "a".repeat(40),
-    baseSha: null, diff: "diff --git a/x b/x",
+    baseSha: null, repository: null, diff: "diff --git a/x b/x",
   });
-  assert.deepEqual(calls[0].slice(-2), ["--json", "title,body,headRefOid,baseRefName,baseRefOid"]);
+  assert.deepEqual(calls[0].slice(-2), ["--json", "title,body,headRefOid,baseRefName,baseRefOid,url"]);
   assert.equal(fromPr(359, { exec: makeExec({ title: "x", body: "y", headRefOid: 42 }) }).headSha, null);
+});
+
+test("fromPr derives repository identity from the PR URL and tolerates absent or malformed URLs", () => {
+  for (const [url, repository] of [
+    ["https://github.com/owner/project/pull/7", "owner/project"],
+    ["https://github.example.com/team/project-name/pull/7/", "team/project-name"],
+    [undefined, null], [null, null], ["not a URL", null],
+    ["https://github.com/owner/project", null], ["file:///owner/project/pull/7", null],
+  ]) {
+    const artifact = fromPr(7, { exec: (_cmd, args) => args.includes("diff") ? "diff text"
+      : JSON.stringify({ title: "Fixture", url, headRefOid: "a".repeat(40), baseRefOid: "b".repeat(40) }) });
+    assert.equal(artifact.repository, repository);
+    assert.equal(artifact.baseSha, "b".repeat(40));
+  }
 });
 
 test("fromPr: a head that MOVES during the diff withholds the certification", () => {

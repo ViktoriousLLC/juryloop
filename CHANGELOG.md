@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.17.0 — 2026-11-26
+
+- The review history now keeps each finding in full: its explanation and its `Check:` line, after
+  the same secret redaction the panel's input gets. Before this, only the title, file and line were
+  kept, so a finding could never be re-checked after its round.
+- Each seat's own time is recorded, and a pull request round records its base commit and its GitHub
+  repository next to the head commit.
+- `node scripts/scorecard.mjs --accuracy` reports how often findings turned out real, per severity,
+  per seat and per judge call, with each seat's median time. Labels from an outside checker
+  (`labels.ndjson`, format in docs/REFERENCE.md) and the fixer's own marks are shown in separate
+  columns, never merged, and a problem raised again in later rounds counts once. It reads local files
+  only.
+
 ## v0.16.1 — 2026-11-19
 
 - The README no longer says none of the other tools keep re-reading fixed work: Theo's council

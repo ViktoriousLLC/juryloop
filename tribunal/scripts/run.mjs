@@ -25,7 +25,7 @@ import { isRecordableRound } from "./panelLogic.mjs";
 /** Require enough independent reviewers for a local PR review proof. */
 const MIN_PROOF_LEGS = 3;
 import { runLeg, classifyLegOutcome } from "./legRunner.mjs";
-import { fromFile, fromText, fromPr, buildUserMessage, goalContext, GH_MISSING_MESSAGE } from "./artifact.mjs";
+import { fromFile, fromText, fromPr, buildUserMessage, goalContext, redactSensitive, GH_MISSING_MESSAGE } from "./artifact.mjs";
 import { clusterFindings, raiseSecurityFindings, summariseRound, loopDecision, soleFindsByLeg, trendLine } from "./panelLogic.mjs";
 import { render } from "./render.mjs";
 import { runJudge, pickJudgeLeg, loneFindings } from "./judge.mjs";
@@ -218,8 +218,9 @@ function buildArtifact(options = {}) {
 /** The Judge numbers only lone non-nits; retain that join separately from cluster order. */
 export function findingList(clusters) {
   const judgeIds = new Map(loneFindings(clusters).map(({ id, cluster }) => [cluster, id]));
-  return clusters.map(({ title, severity, category, file, line, foundBy, raised }, index) => ({
+  return clusters.map(({ title, severity, category, file, line, foundBy, raised, why, check }, index) => ({
     id: `F${index + 1}`, title, severity, category, file, line, foundBy,
+    why: redactSensitive(String(why ?? "")), check: redactSensitive(String(check ?? "")),
     ...(clusters[index].kind ? { kind: clusters[index].kind } : {}),
     ...(clusters[index].kind === "missing-work" ? { goalItem: clusters[index].goalItem } : {}),
     judgeId: judgeIds.get(clusters[index]) ?? null,
@@ -598,10 +599,15 @@ export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runP
     const message = `${readFileSync(policy.reviewerPromptPath, "utf8")}\n\n${artifactMessage}`;
 
     const started = Date.now();
+    const legElapsed = new Map();
     // Run legs in parallel for speed, each in its own directory to prevent CLI conversation
     // state from carrying one reviewer's context into another review.
     const allResults = [
-      ...await Promise.all(legs.map((l) => reviewLeg(l, message))),
+      ...await Promise.all(legs.map(async (l) => {
+        const legStarted = Date.now();
+        try { return await reviewLeg(l, message); }
+        finally { legElapsed.set(l.leg, Date.now() - legStarted); }
+      })),
       ...credentialAbsent.map(({ leg, missing }) => {
         const outcome = classifyLegOutcome({ missingCredentials: missing, model: leg.id });
         return { leg: leg.leg, model: leg.id, ...outcome, answered: false,
@@ -653,7 +659,9 @@ export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runP
 
     const record = {
       ts: new Date().toISOString(),
-      artifact: { kind: artifact.kind, source: artifact.source, title: artifact.title, chars: artifact.text.length, prNumber: artifact.prNumber ?? null, headSha: artifact.headSha ?? null },
+      artifact: { kind: artifact.kind, source: artifact.source, title: artifact.title, chars: artifact.text.length,
+        prNumber: artifact.prNumber ?? null, headSha: artifact.headSha ?? null,
+        baseSha: artifact.baseSha ?? null, repository: artifact.repository ?? null },
       ...(artifact.goal ? { goal: goalContext(artifact.goal) } : {}),
       ...(artifact.goalRefusal ? { goalRefusal: artifact.goalRefusal } : {}),
       droppedMissingWork: findingStats.droppedMissingWork,
@@ -664,6 +672,7 @@ export async function main({ reviewLeg = runLeg, probeOptions = {}, probe = runP
       elapsedMs,
       legs: results.map((r) => ({ leg: r.leg, model: r.model, answered: r.answered, error: r.error,
         kind: r.kind, reason: r.reason, parseFailed: r.parseFailed, shortUnrecognised: Boolean(r.shortUnrecognised),
+        elapsedMs: legElapsed.get(r.leg) ?? null,
         effort: r.effortShown,
         findings: r.findings?.length ?? 0 })),
       // A 4-leg pass must be distinguishable from a 5-leg pass in the LEDGER, not only in the

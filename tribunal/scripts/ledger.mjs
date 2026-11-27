@@ -6,7 +6,7 @@ export function artifactKey(artifact) {
   return artifact.prNumber != null ? `pr:${artifact.prNumber}` : `${artifact.kind}:${artifact.source}`;
 }
 
-export function artifactHistory(artifact, ledgerHome) {
+export function readLedgerRows(ledgerHome) {
   let files;
   try { files = readdirSync(ledgerHome).filter((f) => /^\d{4}-\d{2}\.ndjson$/.test(f)).sort(); }
   catch (e) { if (e.code === "ENOENT") return []; throw e; }
@@ -16,9 +16,13 @@ export function artifactHistory(artifact, ledgerHome) {
       if (!line.trim()) continue;
       try {
         const row = JSON.parse(line);
-        if (row.artifact && artifactKey(row.artifact) === artifactKey(artifact)) rows.push(row);
+        if (row?.artifact) rows.push(row);
       } catch { /* Tolerate a half-written final ledger line. */ }
     }
   }
   return rows;
+}
+
+export function artifactHistory(artifact, ledgerHome) {
+  return readLedgerRows(ledgerHome).filter((row) => artifactKey(row.artifact) === artifactKey(artifact));
 }
